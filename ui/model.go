@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"redmine-tui/config"
+	"redmine-tui/planka"
 	"redmine-tui/redmine"
+	"redmine-tui/sync"
 	"runtime"
 
 	"github.com/atotto/clipboard"
@@ -63,6 +66,7 @@ type Model struct {
 	viewport     viewport.Model
 	textInput    textinput.Model
 	client       *redmine.Client
+	cfg          *config.Config
 	state        sessionState
 	inputState   int // 0: Hours, 1: Comments, 2: Search Query
 	logHours     string
@@ -73,10 +77,10 @@ type Model struct {
 	windowHeight int
 }
 
-func NewModel(apiKey, host string) Model {
-	client := redmine.NewClient(apiKey, host)
+func NewModel(cfg *config.Config) Model {
+	client := redmine.NewClient(cfg.APIKey, cfg.Host)
 	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
-	l.Title = "Assigned Issues (Space: Details, s: Status, t: Log Time, f: Filter, Ctrl+f: Search, e: Export)"
+	l.Title = "Assigned Issues (Space: Details, s: Status, t: Log Time, f: Filter, Ctrl+f: Search, e: Export, p: Sync Planka)"
 
 	sl := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	sl.Title = "Select New Status"
@@ -98,6 +102,7 @@ func NewModel(apiKey, host string) Model {
 
 	return Model{
 		client:      client,
+		cfg:         cfg,
 		list:        l,
 		statusList:  sl,
 		projectList: pl,
@@ -310,6 +315,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.list.NewStatusMessage("Exported to redmine_issues.html and opened in browser")
 		}
 
+		// Handle 'p' for Sync to Planka
+		if msg.String() == "p" {
+			return m, tea.Batch(
+				m.syncPlanka(),
+				m.list.NewStatusMessage("Syncing with Planka..."),
+			)
+		}
+
 	case tea.WindowSizeMsg:
 		m.windowWidth = msg.Width
 		m.windowHeight = msg.Height
@@ -360,6 +373,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		} else if msg == "time_logged" {
 			return m, m.list.NewStatusMessage("Time logged successfully!")
+		} else if msg == "planka_synced" {
+			return m, m.list.NewStatusMessage("Successfully synced with Planka!")
 		}
 
 	case error:
@@ -577,5 +592,20 @@ func (m Model) searchIssues(query string) tea.Cmd {
 			return err
 		}
 		return issues
+	}
+}
+
+func (m Model) syncPlanka() tea.Cmd {
+	return func() tea.Msg {
+		plankaClient := planka.NewClient(m.cfg.Planka.BaseURL, m.cfg.Planka.Username, m.cfg.Planka.Password)
+		if err := plankaClient.Login(); err != nil {
+			return fmt.Errorf("planka login failed: %w", err)
+		}
+
+		if err := sync.SyncIssuesToPlanka(m.client, plankaClient, m.cfg); err != nil {
+			return err
+		}
+
+		return "planka_synced"
 	}
 }

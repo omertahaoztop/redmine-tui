@@ -21,7 +21,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	m := ui.NewModel(cfg.APIKey, cfg.Host)
+	m := ui.NewModel(cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {

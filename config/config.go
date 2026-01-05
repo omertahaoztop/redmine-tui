@@ -9,6 +9,15 @@ import (
 type Config struct {
 	APIKey string `mapstructure:"api_key"`
 	Host   string `mapstructure:"host"`
+	Planka Planka `mapstructure:"planka"`
+}
+
+type Planka struct {
+	BaseURL  string `mapstructure:"base_url"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	BoardID  string `mapstructure:"board_id"`
+	ListID   string `mapstructure:"list_id"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -20,6 +29,9 @@ func LoadConfig() (*Config, error) {
 	// Bind environment variables
 	viper.BindEnv("api_key", "REDMINE_API_KEY")
 	viper.BindEnv("host", "REDMINE_HOST")
+	viper.BindEnv("planka.base_url", "PLANKA_API_URL")
+	viper.BindEnv("planka.username", "PLANKA_USERNAME")
+	viper.BindEnv("planka.password", "PLANKA_PASSWORD")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {

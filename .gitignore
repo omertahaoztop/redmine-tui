@@ -1,0 +1,16 @@
+# Binaries
+redmine-tui
+*.exe
+*.dll
+
+# Exports
+redmine_issues.html
+*.json
+*.log
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# Local Config (if contains secrets)
+.redmine-tui.yaml
