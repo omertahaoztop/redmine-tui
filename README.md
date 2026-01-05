@@ -12,6 +12,7 @@ A Terminal User Interface (TUI) for Redmine, built with Go and Bubble Tea. This 
 - **Search**: Press `Ctrl+f` to search issue descriptions.
 - **Export**: Press `e` to export current view to an HTML file.
 - **Sync to Planka**: Press `p` to sync your assigned Redmine issues to a Planka board list ("Üzerimdeki İşler").
+- **CLI Sync**: Run with `--sync` to perform a one-time sync without the UI (useful for cron jobs).
 
 ## Installation
 
@@ -70,6 +71,16 @@ planka:
 | `p` | Sync to Planka |
 | `Esc` | Go Back / Clear Input |
 | `q` / `Ctrl+c` | Quit |
+
+## Cron Job Example
+
+To run the sync automatically every day at 18:00 (6 PM), add the following to your crontab (`crontab -e`):
+
+```bash
+0 18 * * * /path/to/redmine-tui --sync
+```
+
+Ensure environment variables are set in the cron environment or loaded from `.redmine-tui.yaml`.
 
 ## Requirements
 
