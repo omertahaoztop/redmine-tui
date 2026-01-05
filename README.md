@@ -70,6 +70,14 @@ planka:
   board_id: "1634400507663484080"
   list_id: "1634400550629934260"
 ```
+  list_id: "1634400550629934260"
+```
+
+### How to Get Planka Board & List IDs
+
+1. **Board ID**: Open your Planka board in a browser. The ID is the number in the URL (e.g., `.../boards/1634400507663484080`).
+2. **List ID**: Open the developer tools (F12) -> Network tab, and refresh. Look for the response containing lists (or `tasks`), or often easier: click on the list menu (if available) or check the API calls when you create a card in that list to see the `listId` payload.
+   - Alternatively, you can inspect the HTML of the list element; the ID typically appears in the DOM attributes (`data-id` or similar).
 
 ## Key Bindings
 
