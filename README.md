@@ -22,9 +22,18 @@ A Terminal User Interface (TUI) for Redmine, built with Go and Bubble Tea. This 
    cd redmine-tui
    ```
 
-2. Build the binary:
+2. Build the binary using Make:
+   ```bash
+   make build
+   ```
+   Or manually:
    ```bash
    go build -o redmine-tui .
+   ```
+
+3. Run the application:
+   ```bash
+   make run
    ```
 
 ## Configuration
