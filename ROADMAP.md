@@ -26,7 +26,8 @@ This document tracks the planned features and improvements for the Redmine TUI p
     - [x] Support for `~/.redmine-tui.yaml` or `.env` file
     - [x] Load API Key & Host from config/envd credentials (Host, API Key) to config
 
-- [ ] **Planka Integration (Advanced)**
-    - [ ] Research Planka API
-    - [ ] Implement "Move to Planka" action
-    - [ ] Automatically create a card in Planka from issue details
+- [x] **Planka Integration (Advanced)**
+    - [x] Research Planka API
+    - [x] Implement "Move to Planka" action (Sync)
+    - [x] Automatically create a card in Planka from assigned issues
+    - [x] CLI/Cron support for auto-sync (`--sync`)
