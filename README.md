@@ -38,7 +38,11 @@ A Terminal User Interface (TUI) for Redmine, built with Go and Bubble Tea. This 
 
 ## Configuration
 
-You can configure the application using environment variables or a `.redmine-tui.yaml` file in your home directory or the current directory.
+You can configure the application using environment variables or a configuration file. The application searches for a configuration file in the following order:
+
+1. `$HOME/.redmine-tui.yaml`
+2. `./.redmine-tui.yaml`
+3. `/etc/default/redmine-tui.yaml` (or `.redmine-tui.yaml`)
 
 ### Environment Variables
 

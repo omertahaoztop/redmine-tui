@@ -21,10 +21,13 @@ type Planka struct {
 }
 
 func LoadConfig() (*Config, error) {
-	viper.SetConfigName(".redmine-tui")
-	viper.SetConfigType("yaml")
 	viper.AddConfigPath("$HOME")
 	viper.AddConfigPath(".")
+	viper.AddConfigPath("/etc/default")
+
+	// Try .redmine-tui first (standard for home dir)
+	viper.SetConfigName(".redmine-tui")
+	viper.SetConfigType("yaml")
 
 	// Bind environment variables
 	viper.BindEnv("api_key", "REDMINE_API_KEY")
@@ -36,7 +39,17 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("planka.list_id", "PLANKA_LIST_ID")
 
 	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			// Try redmine-tui (standard for system config)
+			viper.SetConfigName("redmine-tui")
+			if err := viper.ReadInConfig(); err != nil {
+				// If still not found, check if it's really missing or another error
+				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+					return nil, fmt.Errorf("error reading config file: %w", err)
+				}
+				// If not found in either, that's fine, we might rely entirely on Env vars
+			}
+		} else {
 			return nil, fmt.Errorf("error reading config file: %w", err)
 		}
 	}
