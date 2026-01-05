@@ -13,4 +13,4 @@ redmine_issues.html
 .idea/
 
 # Local Config (if contains secrets)
-.redmine-tui.yaml
+
