@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -78,17 +79,26 @@ type Client struct {
 	Client *http.Client
 }
 
+func normalizeHost(host string) string {
+	// If host already has a scheme, use it as-is (after trimming trailing slash)
+	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		return strings.TrimRight(host, "/")
+	}
+	// No scheme: default to https
+	return "https://" + strings.TrimRight(host, "/")
+}
+
 func NewClient(apiKey, host string) *Client {
 	return &Client{
 		APIKey: apiKey,
-		Host:   host,
+		Host:   normalizeHost(host),
 		Client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
 func (c *Client) GetAssignedIssues() ([]Issue, error) {
 	// Filtering by assigned_to_id=me, status=open, and increasing limit to 100
-	url := fmt.Sprintf("https://%s/issues.json?assigned_to_id=me&status_id=open&limit=100", c.Host)
+	url := fmt.Sprintf("%s/issues.json?assigned_to_id=me&status_id=open&limit=100", c.Host)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -117,7 +127,7 @@ func (c *Client) GetAssignedIssues() ([]Issue, error) {
 }
 
 func (c *Client) GetIssueDetails(id int) (*Issue, error) {
-	url := fmt.Sprintf("https://%s/issues/%d.json?include=journals", c.Host, id)
+	url := fmt.Sprintf("%s/issues/%d.json?include=journals", c.Host, id)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -146,7 +156,7 @@ func (c *Client) GetIssueDetails(id int) (*Issue, error) {
 }
 
 func (c *Client) GetIssueStatuses() ([]IssueStatus, error) {
-	url := fmt.Sprintf("https://%s/issue_statuses.json", c.Host)
+	url := fmt.Sprintf("%s/issue_statuses.json", c.Host)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -175,7 +185,7 @@ func (c *Client) GetIssueStatuses() ([]IssueStatus, error) {
 }
 
 func (c *Client) UpdateIssueStatus(issueID, statusID int) error {
-	url := fmt.Sprintf("https://%s/issues/%d.json", c.Host, issueID)
+	url := fmt.Sprintf("%s/issues/%d.json", c.Host, issueID)
 
 	payload := map[string]interface{}{
 		"issue": map[string]int{
@@ -209,7 +219,7 @@ func (c *Client) UpdateIssueStatus(issueID, statusID int) error {
 }
 
 func (c *Client) LogTime(issueID int, hours string, comments string) error {
-	url := fmt.Sprintf("https://%s/time_entries.json", c.Host)
+	url := fmt.Sprintf("%s/time_entries.json", c.Host)
 
 	payload := map[string]interface{}{
 		"time_entry": map[string]interface{}{
@@ -245,7 +255,7 @@ func (c *Client) LogTime(issueID int, hours string, comments string) error {
 }
 
 func (c *Client) SearchIssues(query string) ([]Issue, error) {
-	url := fmt.Sprintf("https://%s/issues.json?assigned_to_id=me&status_id=open&limit=100&description=~%s", c.Host, query)
+	url := fmt.Sprintf("%s/issues.json?assigned_to_id=me&status_id=open&limit=100&description=~%s", c.Host, query)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
