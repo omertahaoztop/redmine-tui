@@ -22,9 +22,16 @@ type Issue struct {
 	ID          int       `json:"id"`
 	Subject     string    `json:"subject"`
 	Description string    `json:"description"`
+	DoneRatio   int       `json:"done_ratio"`
+	DueDate     string    `json:"due_date"`
+	StartDate   string    `json:"start_date"`
 	CreatedOn   time.Time `json:"created_on"`
 	UpdatedOn   time.Time `json:"updated_on"`
-	Status      struct {
+	Tracker     struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"tracker"`
+	Status struct {
 		ID   int    `json:"id"`
 		Name string `json:"name"`
 	} `json:"status"`

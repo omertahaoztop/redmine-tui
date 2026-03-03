@@ -9,372 +9,531 @@ import (
 	"redmine-tui/redmine"
 	"redmine-tui/sync"
 	"runtime"
+	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-var docStyle = lipgloss.NewStyle().Margin(1, 2)
+// ── Styles ──────────────────────────────────────────────────────────────────────────────
+
+var (
+	colorBg      = lipgloss.AdaptiveColor{Light: "#f5f5f5", Dark: "#1a1a2e"}
+	colorSurface = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#16213e"}
+	colorBorder  = lipgloss.AdaptiveColor{Light: "#d0d0d0", Dark: "#2a2a4a"}
+	colorAccent  = lipgloss.AdaptiveColor{Light: "#6c63ff", Dark: "#7c6fff"}
+	colorText    = lipgloss.AdaptiveColor{Light: "#1a1a1a", Dark: "#e8e8f0"}
+	colorMuted   = lipgloss.AdaptiveColor{Light: "#888899", Dark: "#6060a0"}
+	colorSuccess = lipgloss.AdaptiveColor{Light: "#22c55e", Dark: "#4ade80"}
+	colorWarn    = lipgloss.AdaptiveColor{Light: "#f59e0b", Dark: "#fbbf24"}
+	colorDanger  = lipgloss.AdaptiveColor{Light: "#ef4444", Dark: "#f87171"}
+	colorInfo    = lipgloss.AdaptiveColor{Light: "#3b82f6", Dark: "#60a5fa"}
+	colorPurple  = lipgloss.AdaptiveColor{Light: "#8b5cf6", Dark: "#a78bfa"}
+
+	styleColumnHeader = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(colorText).
+			Background(colorSurface).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderBottom(true).
+			BorderForeground(colorAccent).
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	styleColumnHeaderActive = styleColumnHeader.
+				Foreground(colorAccent).
+				Bold(true)
+
+	styleColumn = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorBorder).
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	styleColumnActive = styleColumn.
+				BorderForeground(colorAccent)
+
+	styleCard = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorBorder).
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	styleCardSelected = styleCard.
+				BorderForeground(colorAccent).
+				Background(lipgloss.AdaptiveColor{Light: "#f0eeff", Dark: "#1e1a40"})
+
+	styleDetailTitle = lipgloss.NewStyle().
+				Foreground(colorAccent).
+				Bold(true).
+				PaddingBottom(1)
+
+	styleDetailLabel = lipgloss.NewStyle().
+				Foreground(colorMuted).
+				Bold(true)
+
+	styleDetailPanel = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorAccent).
+				Padding(1, 2)
+
+	styleInputPanel = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorPurple).
+				Padding(1, 2)
+
+	styleHelpKey  = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleHelpDesc = lipgloss.NewStyle().Foreground(colorMuted)
+
+	styleTag = lipgloss.NewStyle().
+			Foreground(colorSurface).
+			Background(colorAccent).
+			PaddingLeft(1).
+			PaddingRight(1)
+
+	styleProjectTag = lipgloss.NewStyle().
+				Foreground(colorSurface).
+				Background(colorInfo).
+				PaddingLeft(1).
+				PaddingRight(1)
+
+	styleCountBadge = lipgloss.NewStyle().
+				Foreground(colorSurface).
+				Background(colorMuted).
+				PaddingLeft(1).
+				PaddingRight(1)
+
+	stylePriorityUrgent = lipgloss.NewStyle().Foreground(colorDanger).Bold(true)
+	stylePriorityHigh   = lipgloss.NewStyle().Foreground(colorWarn).Bold(true)
+	stylePriorityNormal = lipgloss.NewStyle().Foreground(colorInfo)
+	stylePriorityLow    = lipgloss.NewStyle().Foreground(colorMuted)
+
+	styleOverdue  = lipgloss.NewStyle().Foreground(colorDanger).Bold(true)
+	styleDueToday = lipgloss.NewStyle().Foreground(colorWarn).Bold(true)
+	styleDueSoon  = lipgloss.NewStyle().Foreground(colorInfo)
+)
+
+// ── Priority / due helpers ─────────────────────────────────────────────────────
+
+func priorityStyle(name string) lipgloss.Style {
+	switch strings.ToLower(name) {
+	case "acil", "urgent", "immediate":
+		return stylePriorityUrgent
+	case "yüksek", "high":
+		return stylePriorityHigh
+	case "normal":
+		return stylePriorityNormal
+	default:
+		return stylePriorityLow
+	}
+}
+
+func priorityIcon(name string) string {
+	switch strings.ToLower(name) {
+	case "acil", "urgent", "immediate":
+		return "▲▲"
+	case "yüksek", "high":
+		return "▲"
+	case "normal":
+		return "●"
+	default:
+		return "▽"
+	}
+}
+
+func dueDateStyle(due string) (string, lipgloss.Style) {
+	if due == "" {
+		return "", stylePriorityLow
+	}
+	t, err := time.Parse("2006-01-02", due)
+	if err != nil {
+		return due, stylePriorityLow
+	}
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	days := int(t.Sub(today).Hours() / 24)
+	switch {
+	case days < 0:
+		return fmt.Sprintf("⚠ %s (%dd)", due, days), styleOverdue
+	case days == 0:
+		return "⏰ Bugün", styleDueToday
+	case days <= 3:
+		return fmt.Sprintf("→ %s (%dd)", due, days), styleDueSoon
+	default:
+		return fmt.Sprintf("→ %s", due), stylePriorityLow
+	}
+}
+
+func progressBar(ratio int, width int) string {
+	if width < 4 {
+		return ""
+	}
+	filled := (ratio * width) / 100
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	color := colorSuccess
+	if ratio < 30 {
+		color = colorMuted
+	} else if ratio < 70 {
+		color = colorInfo
+	}
+	return lipgloss.NewStyle().Foreground(color).Render(bar)
+}
+
+// ── Session state ───────────────────────────────────────────────────────────────────
 
 type sessionState int
 
 const (
-	listView sessionState = iota
+	kanbanView sessionState = iota
 	detailView
 	statusView
 	timeInputView
-	projectFilterView
 	searchView
 )
 
-type item struct {
-	issue redmine.Issue
-}
-
-func (i item) Title() string { return i.issue.Subject }
-func (i item) Description() string {
-	return fmt.Sprintf("%s | %s", i.issue.Project.Name, i.issue.Status.Name)
-}
-func (i item) FilterValue() string { return i.issue.Subject }
-
-type statusItem struct {
-	status redmine.IssueStatus
-}
-
-func (i statusItem) Title() string       { return i.status.Name }
-func (i statusItem) Description() string { return fmt.Sprintf("ID: %d", i.status.ID) }
-func (i statusItem) FilterValue() string { return i.status.Name }
-
-type projectItem struct {
-	name string
-	id   int
-}
-
-func (i projectItem) Title() string       { return i.name }
-func (i projectItem) Description() string { return "" }
-func (i projectItem) FilterValue() string { return i.name }
+// ── Model ──────────────────────────────────────────────────────────────────────────────
 
 type Model struct {
-	list         list.Model
-	statusList   list.Model
-	projectList  list.Model
-	allIssues    []redmine.Issue
-	viewport     viewport.Model
-	textInput    textinput.Model
-	client       *redmine.Client
-	cfg          *config.Config
-	state        sessionState
-	inputState   int // 0: Hours, 1: Comments, 2: Search Query
-	logHours     string
-	selected     *redmine.Issue
-	loaded       bool
-	err          error
+	client     *redmine.Client
+	cfg        *config.Config
+	state      sessionState
+	inputState int
+
+	allIssues []redmine.Issue
+	statuses  []redmine.IssueStatus
+	selected  *redmine.Issue
+	loaded    bool
+	err       error
+
+	columns []kanbanColumn
+	colIdx  int
+	cardIdx int
+
+	activeFilter string
+
+	textInput textinput.Model
+	logHours  string
+	viewport  viewport.Model
+
 	windowWidth  int
 	windowHeight int
+
+	statusMsg string
+}
+
+type kanbanColumn struct {
+	status redmine.IssueStatus
+	issues []redmine.Issue
+}
+
+type issuesMsg struct {
+	issues []redmine.Issue
+	loaded bool
 }
 
 func NewModel(cfg *config.Config) Model {
 	client := redmine.NewClient(cfg.APIKey, cfg.Host)
-	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
-	l.Title = "Assigned Issues (Space: Details, s: Status, t: Log Time, f: Filter, Ctrl+f: Search, e: Export, p: Sync Planka)"
-
-	sl := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
-	sl.Title = "Select New Status"
-
-	pl := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
-	pl.Title = "Filter by Project"
-
-	vp := viewport.New(0, 0)
-	vp.Style = lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("62")).
-		PaddingRight(2)
 
 	ti := textinput.New()
 	ti.Placeholder = "Enter hours (e.g. 1.5)"
 	ti.Focus()
-	ti.CharLimit = 156
-	ti.Width = 20
+	ti.CharLimit = 256
+	ti.Width = 40
+
+	vp := viewport.New(0, 0)
+	vp.Style = styleDetailPanel
 
 	return Model{
-		client:      client,
-		cfg:         cfg,
-		list:        l,
-		statusList:  sl,
-		projectList: pl,
-		viewport:    vp,
-		textInput:   ti,
-		state:       listView,
+		client:    client,
+		cfg:       cfg,
+		state:     kanbanView,
+		textInput: ti,
+		viewport:  vp,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.fetchIssues, textinput.Blink)
+	return tea.Batch(m.fetchIssues, m.fetchStatuses, textinput.Blink)
 }
+
+// ── Update ──────────────────────────────────────────────────────────────────────────────
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
-
 		if msg.String() == "ctrl+f" {
 			m.state = searchView
-			m.inputState = 2 // Search Query
+			m.inputState = 2
 			m.textInput.Reset()
-			m.textInput.Placeholder = "Search description..."
+			m.textInput.Placeholder = "Search issues..."
 			m.textInput.Width = 50
 			m.textInput.Focus()
 			return m, textinput.Blink
 		}
 
-		if m.state == detailView {
-			if msg.String() == "esc" {
-				m.state = listView
-				return m, nil
+		switch m.state {
+		case detailView:
+			switch msg.String() {
+			case "esc", "q":
+				m.state = kanbanView
+			case "s":
+				if m.selected != nil {
+					for i, s := range m.statuses {
+						if s.ID == m.selected.Status.ID {
+							m.colIdx = i
+							break
+						}
+					}
+					m.state = statusView
+				}
+			case "t":
+				if m.selected != nil {
+					m.state = timeInputView
+					m.inputState = 0
+					m.textInput.Reset()
+					m.textInput.Placeholder = "Enter hours (e.g. 1.5)"
+					m.textInput.Width = 20
+					m.textInput.Focus()
+					return m, textinput.Blink
+				}
+			case "y":
+				if m.selected != nil {
+					clipboard.WriteAll(m.selected.Subject)
+					m.statusMsg = "Copied to clipboard!"
+				}
+			default:
+				m.viewport, cmd = m.viewport.Update(msg)
+				return m, cmd
 			}
-			m.viewport, cmd = m.viewport.Update(msg)
-			return m, cmd
-		}
+			return m, nil
 
-		if m.state == statusView {
-			if msg.String() == "esc" {
-				m.state = listView
+		case statusView:
+			switch msg.String() {
+			case "esc":
+				if m.selected != nil {
+					m.state = detailView
+				} else {
+					m.state = kanbanView
+				}
 				return m, nil
-			}
-			if msg.String() == "enter" {
-				if i, ok := m.statusList.SelectedItem().(statusItem); ok {
-					var issueID int
+			case "enter":
+				if len(m.statuses) > 0 && m.colIdx < len(m.statuses) {
+					st := m.statuses[m.colIdx]
+					issueID := 0
 					if m.selected != nil {
 						issueID = m.selected.ID
-					} else if lItem, ok := m.list.SelectedItem().(item); ok {
-						issueID = lItem.issue.ID
 					}
-
 					if issueID != 0 {
-						return m, tea.Batch(
-							m.updateStatus(issueID, i.status.ID),
-							m.list.NewStatusMessage(fmt.Sprintf("Updating status to %s...", i.status.Name)),
-						)
+						m.state = kanbanView
+						return m, m.updateStatus(issueID, st.ID)
 					}
 				}
-			}
-			m.statusList, cmd = m.statusList.Update(msg)
-			return m, cmd
-		}
-
-		if m.state == projectFilterView {
-			if msg.String() == "esc" {
-				m.state = listView
-				return m, nil
-			}
-			if msg.String() == "enter" {
-				if i, ok := m.projectList.SelectedItem().(projectItem); ok {
-					var filteredItems []list.Item
-					if i.name == "All Projects" {
-						filteredItems = make([]list.Item, len(m.allIssues))
-						for idx, issue := range m.allIssues {
-							filteredItems[idx] = item{issue: issue}
-						}
-						m.list.Title = "Assigned Issues (All Projects)"
-					} else {
-						for _, issue := range m.allIssues {
-							if issue.Project.ID == i.id {
-								filteredItems = append(filteredItems, item{issue: issue})
-							}
-						}
-						m.list.Title = fmt.Sprintf("Assigned Issues (%s)", i.name)
-					}
-					m.list.SetItems(filteredItems)
-					m.state = listView
-					return m, nil
+			case "left", "h":
+				if m.colIdx > 0 {
+					m.colIdx--
+				}
+			case "right", "l":
+				if m.colIdx < len(m.statuses)-1 {
+					m.colIdx++
 				}
 			}
-			m.projectList, cmd = m.projectList.Update(msg)
-			return m, cmd
-		}
+			return m, nil
 
-		if m.state == timeInputView || m.state == searchView {
-			if msg.String() == "esc" {
-				m.state = listView
+		case timeInputView:
+			switch msg.String() {
+			case "esc":
+				m.state = detailView
 				m.textInput.Reset()
 				return m, nil
 			}
 			if msg.Type == tea.KeyEnter {
-				if m.state == searchView { // Search submitted
-					query := m.textInput.Value()
-					m.state = listView
-					m.textInput.Reset()
-					return m, tea.Batch(
-						m.searchIssues(query),
-						m.list.NewStatusMessage(fmt.Sprintf("Searching for '%s'...", query)),
-					)
-				}
-
-				if m.inputState == 0 { // Hours entered
+				if m.inputState == 0 {
 					m.logHours = m.textInput.Value()
 					m.inputState = 1
 					m.textInput.Reset()
 					m.textInput.Placeholder = "Enter comments..."
 					m.textInput.Width = 50
 					return m, nil
-				} else { // Comments entered
-					comments := m.textInput.Value()
-					var issueID int
-					if m.selected != nil {
-						issueID = m.selected.ID
-					} else if lItem, ok := m.list.SelectedItem().(item); ok {
-						issueID = lItem.issue.ID
-					}
-
-					if issueID != 0 {
-						m.state = listView
-						m.textInput.Reset()
-						return m, tea.Batch(
-							m.logTime(issueID, m.logHours, comments),
-							m.list.NewStatusMessage("Logging time..."),
-						)
-					}
+				}
+				comments := m.textInput.Value()
+				issueID := 0
+				if m.selected != nil {
+					issueID = m.selected.ID
+				}
+				if issueID != 0 {
+					m.state = detailView
+					m.textInput.Reset()
+					return m, m.logTime(issueID, m.logHours, comments)
 				}
 			}
 			m.textInput, cmd = m.textInput.Update(msg)
 			return m, cmd
-		}
 
-		// List View Controls
-		if msg.String() == "enter" {
-			if i, ok := m.list.SelectedItem().(item); ok {
-				clipboard.WriteAll(i.issue.Subject)
-				return m, m.list.NewStatusMessage("Copied to clipboard!")
-			}
-		}
-
-		if msg.String() == " " { // Space to open details
-			if i, ok := m.list.SelectedItem().(item); ok {
-				m.state = detailView
-				m.selected = &i.issue // Keep basic info until details load
-				m.viewport.SetContent("Loading details...")
-				return m, m.fetchIssueDetails(i.issue.ID)
-			}
-		}
-
-		if msg.String() == "s" { // Status selection
-			if i, ok := m.list.SelectedItem().(item); ok {
-				m.selected = &i.issue // Track which issue we are editing
-				m.state = statusView
-				if len(m.statusList.Items()) == 0 {
-					return m, m.fetchStatuses
-				}
+		case searchView:
+			switch msg.String() {
+			case "esc":
+				m.state = kanbanView
+				m.textInput.Reset()
+				m.rebuildColumns(m.allIssues)
 				return m, nil
 			}
-		}
-
-		if msg.String() == "t" { // Time logging
-			if i, ok := m.list.SelectedItem().(item); ok {
-				m.selected = &i.issue
-				m.state = timeInputView
-				m.inputState = 0
-				m.textInput.Placeholder = "Enter hours (e.g. 1.5)"
-				m.textInput.Width = 20
-				m.textInput.Focus()
-				return m, textinput.Blink
+			if msg.Type == tea.KeyEnter {
+				query := m.textInput.Value()
+				m.state = kanbanView
+				m.textInput.Reset()
+				return m, m.searchIssues(query)
 			}
-		}
+			m.textInput, cmd = m.textInput.Update(msg)
+			return m, cmd
 
-		if msg.String() == "f" { // Filter by project
-			m.state = projectFilterView
-
-			// Extract unique projects
-			projects := make(map[int]string)
-			for _, issue := range m.allIssues {
-				projects[issue.Project.ID] = issue.Project.Name
+		case kanbanView:
+			switch msg.String() {
+			case "q":
+				return m, tea.Quit
+			case "left", "h":
+				if m.colIdx > 0 {
+					m.colIdx--
+					m.cardIdx = 0
+				}
+			case "right", "l":
+				if m.colIdx < len(m.columns)-1 {
+					m.colIdx++
+					m.cardIdx = 0
+				}
+			case "up", "k":
+				if m.cardIdx > 0 {
+					m.cardIdx--
+				}
+			case "down", "j":
+				col := m.currentColumn()
+				if col != nil && m.cardIdx < len(col.issues)-1 {
+					m.cardIdx++
+				}
+			case "enter", " ":
+				issue := m.selectedIssue()
+				if issue != nil {
+					m.selected = issue
+					m.state = detailView
+					m.viewport.SetContent("Loading details...")
+					m.viewport.GotoTop()
+					return m, m.fetchIssueDetails(issue.ID)
+				}
+			case "s":
+				issue := m.selectedIssue()
+				if issue != nil {
+					m.selected = issue
+					for i, s := range m.statuses {
+						if s.ID == issue.Status.ID {
+							m.colIdx = i
+							break
+						}
+					}
+					m.state = statusView
+				}
+			case "t":
+				issue := m.selectedIssue()
+				if issue != nil {
+					m.selected = issue
+					m.state = timeInputView
+					m.inputState = 0
+					m.textInput.Reset()
+					m.textInput.Placeholder = "Enter hours (e.g. 1.5)"
+					m.textInput.Width = 20
+					m.textInput.Focus()
+					return m, textinput.Blink
+				}
+			case "y":
+				issue := m.selectedIssue()
+				if issue != nil {
+					clipboard.WriteAll(issue.Subject)
+					m.statusMsg = "Copied to clipboard!"
+				}
+			case "f":
+				projects := m.uniqueProjects()
+				if len(projects) == 0 {
+					return m, nil
+				}
+				cur := m.activeFilter
+				idx := -1
+				for i, p := range projects {
+					if p == cur {
+						idx = i
+						break
+					}
+				}
+				if idx == -1 || idx >= len(projects)-1 {
+					m.activeFilter = ""
+				} else {
+					m.activeFilter = projects[idx+1]
+				}
+				m.applyFilter()
+				m.colIdx = 0
+				m.cardIdx = 0
+				if m.activeFilter == "" {
+					m.statusMsg = "Filter: All projects"
+				} else {
+					m.statusMsg = fmt.Sprintf("Filter: %s", m.activeFilter)
+				}
+			case "r":
+				return m, tea.Batch(m.fetchIssues, m.fetchStatuses)
+			case "e":
+				err := m.exportToHTML()
+				if err != nil {
+					m.statusMsg = fmt.Sprintf("Export error: %v", err)
+				} else {
+					m.statusMsg = "Exported to redmine_issues.html"
+				}
+			case "p":
+				m.statusMsg = "Syncing with Planka..."
+				return m, m.syncPlanka()
 			}
-
-			items := []list.Item{projectItem{name: "All Projects", id: 0}}
-			for id, name := range projects {
-				items = append(items, projectItem{name: name, id: id})
-			}
-			m.projectList.SetItems(items)
-			return m, nil
-		}
-
-		// Handle 'e' for Export
-		if msg.String() == "e" {
-			err := m.exportToHTML()
-			if err != nil {
-				return m, m.list.NewStatusMessage(fmt.Sprintf("Error exporting: %v", err))
-			}
-			return m, m.list.NewStatusMessage("Exported to redmine_issues.html and opened in browser")
-		}
-
-		// Handle 'p' for Sync to Planka
-		if msg.String() == "p" {
-			return m, tea.Batch(
-				m.syncPlanka(),
-				m.list.NewStatusMessage("Syncing with Planka..."),
-			)
 		}
 
 	case tea.WindowSizeMsg:
 		m.windowWidth = msg.Width
 		m.windowHeight = msg.Height
-		h, v := docStyle.GetFrameSize()
-		m.list.SetSize(msg.Width-h, msg.Height-v)
-		m.statusList.SetSize(msg.Width-h, msg.Height-v)
-		m.projectList.SetSize(msg.Width-h, msg.Height-v)
+		m.viewport.Width = msg.Width - 8
+		m.viewport.Height = msg.Height - 10
 
-		// Update viewport size
-		m.viewport.Width = msg.Width - h
-		m.viewport.Height = msg.Height - v
-
-	case []redmine.Issue:
-		m.allIssues = msg // Store all issues
-		items := make([]list.Item, len(msg))
-		for i, issue := range msg {
-			items[i] = item{issue: issue}
-		}
-		m.list.SetItems(items)
+	case issuesMsg:
+		m.allIssues = msg.issues
 		m.loaded = true
-
-		if m.state == searchView { // Return to list view after search results loaded
-			m.state = listView
+		if m.activeFilter != "" {
+			m.applyFilter()
+		} else {
+			m.rebuildColumns(msg.issues)
 		}
 
-		// If we updated status, return to list view
-		if m.state == statusView {
-			m.state = listView
-		}
+	case []redmine.IssueStatus:
+		m.statuses = msg
+		m.rebuildColumns(m.allIssues)
 
-	case *redmine.Issue: // Detail fetched
+	case *redmine.Issue:
 		m.selected = msg
 		m.viewport.SetContent(renderDetail(msg, m.viewport.Width))
+		m.viewport.GotoTop()
 
-	case []redmine.IssueStatus: // Statuses fetched
-		items := make([]list.Item, len(msg))
-		for i, s := range msg {
-			items[i] = statusItem{status: s}
-		}
-		m.statusList.SetItems(items)
-
-	case string: // Status update success (custom msg)
-		if msg == "status_updated" {
-			m.state = listView
-			return m, tea.Batch(
-				m.list.NewStatusMessage("Status updated!"),
-				m.fetchIssues, // Refresh list
-			)
-		} else if msg == "time_logged" {
-			return m, m.list.NewStatusMessage("Time logged successfully!")
-		} else if msg == "planka_synced" {
-			return m, m.list.NewStatusMessage("Successfully synced with Planka!")
+	case string:
+		switch msg {
+		case "status_updated":
+			m.statusMsg = "Status updated!"
+			return m, tea.Batch(m.fetchIssues, m.fetchStatuses)
+		case "time_logged":
+			m.statusMsg = "Time logged!"
+		case "planka_synced":
+			m.statusMsg = "Synced with Planka!"
+		default:
+			m.statusMsg = msg
 		}
 
 	case error:
@@ -382,169 +541,652 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	m.list, cmd = m.list.Update(msg)
-	cmds = append(cmds, cmd)
-	return m, tea.Batch(cmds...)
+	return m, cmd
 }
 
-func renderDetail(issue *redmine.Issue, width int) string {
-	infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render
-	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true).Render
+// ── Kanban helpers ───────────────────────────────────────────────────────────────────
 
-	content := fmt.Sprintf("%s\n%s\n\n", titleStyle(issue.Subject), infoStyle(fmt.Sprintf("ID: %d | Status: %s | Priority: %s", issue.ID, issue.Status.Name, issue.Priority.Name)))
+func (m *Model) rebuildColumns(issues []redmine.Issue) {
+	if len(m.statuses) == 0 {
+		seen := map[int]bool{}
+		cols := []kanbanColumn{}
+		for _, issue := range issues {
+			if !seen[issue.Status.ID] {
+				seen[issue.Status.ID] = true
+				cols = append(cols, kanbanColumn{
+					status: redmine.IssueStatus{ID: issue.Status.ID, Name: issue.Status.Name},
+				})
+			}
+		}
+		for i := range cols {
+			for _, issue := range issues {
+				if issue.Status.ID == cols[i].status.ID {
+					cols[i].issues = append(cols[i].issues, issue)
+				}
+			}
+		}
+		m.columns = cols
+		return
+	}
 
-	content += fmt.Sprintf("Project: %s\n", issue.Project.Name)
-	content += fmt.Sprintf("Author: %s\n", issue.Author.Name)
-	content += fmt.Sprintf("Created: %s\n\n", issue.CreatedOn.Format("2006-01-02 15:04"))
-
-	content += lipgloss.NewStyle().Bold(true).Render("Description:") + "\n"
-	content += issue.Description + "\n\n"
-
-	if len(issue.Journals) > 0 {
-		content += lipgloss.NewStyle().Bold(true).Render("History:") + "\n"
-		for _, j := range issue.Journals {
-			if j.Notes != "" {
-				content += fmt.Sprintf("--- \n%s (%s):\n%s\n", j.User.Name, j.CreatedOn.Format("01/02 15:04"), j.Notes)
+	cols := make([]kanbanColumn, len(m.statuses))
+	for i, st := range m.statuses {
+		cols[i] = kanbanColumn{status: st}
+		for _, issue := range issues {
+			if issue.Status.ID == st.ID {
+				cols[i].issues = append(cols[i].issues, issue)
 			}
 		}
 	}
-
-	return content
+	nonEmpty := []kanbanColumn{}
+	for _, col := range cols {
+		if len(col.issues) > 0 {
+			nonEmpty = append(nonEmpty, col)
+		}
+	}
+	m.columns = nonEmpty
+	if m.colIdx >= len(m.columns) {
+		m.colIdx = max(0, len(m.columns)-1)
+	}
 }
 
-func (m Model) exportToHTML() error {
-	filename := "redmine_issues.html"
-	f, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	htmlContent := `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Redmine Issues</title>
-    <style>
-        body { font-family: sans-serif; padding: 20px; }
-        table { border-collapse: collapse; width: 100%; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        tr:hover { background-color: #f5f5f5; }
-        .copy-btn { margin-bottom: 20px; padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 5px;}
-        .copy-btn:hover { background: #0056b3; }
-    </style>
-</head>
-<body>
-    <button class="copy-btn" onclick="copyTable()">Copy Table</button>
-    <table id="issuesTable">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Project</th>
-                <th>Priority</th>
-                <th>Status</th>
-                <th>Subject</th>
-            </tr>
-        </thead>
-        <tbody>
-`
-	if _, err := f.WriteString(htmlContent); err != nil {
-		return err
-	}
-
-	for _, i := range m.list.Items() {
-		if itm, ok := i.(item); ok {
-			row := fmt.Sprintf("<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
-				itm.issue.ID,
-				itm.issue.Project.Name,
-				itm.issue.Priority.Name,
-				itm.issue.Status.Name,
-				itm.issue.Subject,
-			)
-			if _, err := f.WriteString(row); err != nil {
-				return err
+func (m *Model) applyFilter() {
+	filtered := m.allIssues
+	if m.activeFilter != "" {
+		filtered = []redmine.Issue{}
+		for _, issue := range m.allIssues {
+			if issue.Project.Name == m.activeFilter {
+				filtered = append(filtered, issue)
 			}
 		}
 	}
-
-	footer := `
-        </tbody>
-    </table>
-    <script>
-        function copyTable() {
-            var range = document.createRange();
-            range.selectNode(document.getElementById("issuesTable"));
-            window.getSelection().removeAllRanges(); 
-            window.getSelection().addRange(range); 
-            document.execCommand("copy");
-            window.getSelection().removeAllRanges();
-            alert("Table copied to clipboard!");
-        }
-    </script>
-</body>
-</html>`
-	if _, err := f.WriteString(footer); err != nil {
-		return err
-	}
-
-	return openBrowser(filename)
+	m.rebuildColumns(filtered)
 }
 
-func openBrowser(url string) error {
-	var err error
-	switch runtime.GOOS {
-	case "linux":
-		err = exec.Command("xdg-open", url).Start()
-	case "windows":
-		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	case "darwin":
-		err = exec.Command("open", url).Start()
-	default:
-		err = fmt.Errorf("unsupported platform")
+func (m *Model) uniqueProjects() []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, issue := range m.allIssues {
+		if !seen[issue.Project.Name] {
+			seen[issue.Project.Name] = true
+			out = append(out, issue.Project.Name)
+		}
 	}
-	return err
+	return out
 }
+
+func (m *Model) currentColumn() *kanbanColumn {
+	if len(m.columns) == 0 || m.colIdx >= len(m.columns) {
+		return nil
+	}
+	return &m.columns[m.colIdx]
+}
+
+func (m *Model) selectedIssue() *redmine.Issue {
+	col := m.currentColumn()
+	if col == nil || len(col.issues) == 0 || m.cardIdx >= len(col.issues) {
+		return nil
+	}
+	return &col.issues[m.cardIdx]
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// ── View ────────────────────────────────────────────────────────────────────────────────
 
 func (m Model) View() string {
 	if m.err != nil {
-		return fmt.Sprintf("Error: %v", m.err)
+		return styleDetailPanel.Render(
+			styleDetailTitle.Render("Error") + "\n\n" +
+				lipgloss.NewStyle().Foreground(colorDanger).Render(m.err.Error()),
+		)
 	}
-	if !m.loaded {
-		return "Loading issues..."
+	switch m.state {
+	case detailView:
+		return m.viewDetail()
+	case statusView:
+		return m.viewStatusPicker()
+	case timeInputView:
+		return m.viewTimeInput()
+	case searchView:
+		return m.viewSearch()
+	default:
+		return m.viewKanban()
 	}
-
-	if m.state == detailView {
-		return docStyle.Render(m.viewport.View())
-	}
-
-	if m.state == statusView {
-		return docStyle.Render(m.statusList.View())
-	}
-
-	if m.state == projectFilterView {
-		return docStyle.Render(m.projectList.View())
-	}
-
-	if m.state == searchView {
-		return docStyle.Render(fmt.Sprintf(
-			"Search Issues\n\n%s\n\n%s",
-			"Enter search query (searches description):",
-			m.textInput.View(),
-		))
-	}
-
-	return docStyle.Render(m.list.View())
 }
+
+// ── Kanban view ────────────────────────────────────────────────────────────────────────
+
+func (m Model) viewKanban() string {
+	if !m.loaded {
+		return lipgloss.Place(
+			m.windowWidth, m.windowHeight,
+			lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Foreground(colorAccent).Render("⦾")+ " Loading issues...",
+		)
+	}
+
+	w := m.windowWidth
+	h := m.windowHeight
+	if w == 0 {
+		w = 120
+	}
+	if h == 0 {
+		h = 40
+	}
+
+	// header=2 lines (bar+divider), footer=2-3 lines (divider+help[+status])
+	// use fixed offsets to avoid ANSI-width mis-measurement
+	headerH := 2
+	footerH := 2
+	if m.statusMsg != "" {
+		footerH = 3
+	}
+	boardH := h - headerH - footerH
+	if boardH < 4 {
+		boardH = 4
+	}
+
+	header := m.renderHeader(w)
+	footer := m.renderFooter(w)
+	board := m.renderBoard(w, boardH)
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, board, footer)
+}
+
+func (m Model) renderHeader(w int) string {
+	titleText := "◈ Redmine Kanban"
+	totalText := fmt.Sprintf("%d issues", len(m.allIssues))
+
+	// Render styled parts
+	titleStyled := lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render(titleText)
+	filterStyled := ""
+	if m.activeFilter != "" {
+		filterStyled = "  " + styleProjectTag.Render(m.activeFilter)
+	}
+	totalStyled := lipgloss.NewStyle().Foreground(colorMuted).Render(totalText)
+
+	leftStyled := titleStyled + filterStyled
+
+	// Compute ANSI-aware widths for gap (inner area = w-2, since Padding(0,1) adds 2)
+	inner := w - 2
+	if inner < 4 {
+		inner = 4
+	}
+	leftW := lipgloss.Width(leftStyled)
+	rightW := lipgloss.Width(totalStyled)
+	gap := inner - leftW - rightW
+	if gap < 1 {
+		// Not enough room — drop the right-side counter rather than overflow
+		gap = 0
+		totalStyled = ""
+		rightW = 0
+		gap = inner - leftW
+		if gap < 0 {
+			gap = 0
+		}
+	}
+
+	content := leftStyled + strings.Repeat(" ", gap) + totalStyled
+
+	// Width(w-2): Padding(0,1) adds 2, so final rendered width = w
+	bar := lipgloss.NewStyle().
+		Background(colorSurface).
+		Padding(0, 1).
+		Width(w - 2).
+		Render(content)
+
+	divider := lipgloss.NewStyle().
+		Foreground(colorAccent).
+		Render(strings.Repeat("-", w))
+
+	return lipgloss.JoinVertical(lipgloss.Left, bar, divider)
+}
+func (m Model) renderFooter(w int) string {
+	keys := []struct{ k, d string }{
+		{"←→", "col"}, {"↑↓", "card"}, {"↵", "detail"},
+		{"s", "status"}, {"t", "time"}, {"f", "filter"},
+		{"y", "copy"}, {"r", "refresh"}, {"e", "export"},
+		{"p", "planka"}, {"^f", "search"}, {"q", "quit"},
+	}
+	parts := []string{}
+	for _, kv := range keys {
+		parts = append(parts, styleHelpKey.Render(kv.k)+" "+styleHelpDesc.Render(kv.d))
+	}
+	help := strings.Join(parts, styleHelpDesc.Render(" · "))
+
+	divider := lipgloss.NewStyle().
+		Foreground(colorBorder).
+		Render(strings.Repeat("-", w))
+
+	lines := []string{divider}
+	if m.statusMsg != "" {
+		lines = append(lines,
+			lipgloss.NewStyle().Foreground(colorSuccess).PaddingLeft(2).Render("✓ "+m.statusMsg))
+	}
+	lines = append(lines, lipgloss.NewStyle().PaddingLeft(2).Render(help))
+
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+func (m Model) renderBoard(w, h int) string {
+	if len(m.columns) == 0 {
+		return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Foreground(colorMuted).Render("No issues found"))
+	}
+
+	// colOverhead: RoundedBorder(left+right=2) + PaddingLeft+Right(2) = 4
+	const colOverhead = 4
+	// minColContent is the narrowest usable card content area
+	const minColContent = 24
+
+	numCols := len(m.columns)
+
+	// How many columns actually fit?
+	// Each col takes (colContent + colOverhead) columns.
+	// Start with equal distribution, then clamp.
+	colContent := (w - numCols*colOverhead) / numCols
+	if colContent < minColContent {
+		// Try fewer visible columns
+		for numCols > 1 && colContent < minColContent {
+			numCols--
+			colContent = (w - numCols*colOverhead) / numCols
+		}
+		if colContent < minColContent {
+			colContent = minColContent
+		}
+	}
+
+	// Visible column window: center around active column
+	visStart := m.colIdx - numCols/2
+	if visStart < 0 {
+		visStart = 0
+	}
+	if visStart+numCols > len(m.columns) {
+		visStart = len(m.columns) - numCols
+		if visStart < 0 {
+			visStart = 0
+		}
+	}
+	visEnd := visStart + numCols
+	if visEnd > len(m.columns) {
+		visEnd = len(m.columns)
+	}
+	visibleCols := m.columns[visStart:visEnd]
+
+	// card: border(2) + title(1) + meta(1) + maybe bar(1) = ~5 lines content + 2 border = 7
+	cardH := 7
+	maxCards := (h - 3) / cardH
+	if maxCards < 1 {
+		maxCards = 1
+	}
+
+	cols := []string{}
+	for ci, col := range visibleCols {
+		globalIdx := visStart + ci
+		active := globalIdx == m.colIdx
+
+		count := styleCountBadge.Render(fmt.Sprintf("%d", len(col.issues)))
+		// NormalBorder adds PaddingLeft+Right(1) each side = 2; so header inner = colContent-2
+		headerInner := colContent - 2
+		if headerInner < 4 {
+			headerInner = 4
+		}
+		headerText := col.status.Name + " " + count
+		var header string
+		if active {
+			header = styleColumnHeaderActive.Width(headerInner).Render(headerText)
+		} else {
+			header = styleColumnHeader.Width(headerInner).Render(headerText)
+		}
+
+		cardStart := 0
+		if active && m.cardIdx >= maxCards {
+			cardStart = m.cardIdx - maxCards + 1
+		}
+		cardEnd := cardStart + maxCards
+		if cardEnd > len(col.issues) {
+			cardEnd = len(col.issues)
+		}
+
+		cards := []string{header}
+		for i := cardStart; i < cardEnd; i++ {
+			issue := col.issues[i]
+			selectedCard := active && i == m.cardIdx
+			// renderCard receives colContent; card adds its own border+padding internally
+			cards = append(cards, renderCard(issue, colContent-4, selectedCard))
+		}
+
+		// Scroll indicators
+		if cardStart > 0 {
+			cards = append([]string{lipgloss.NewStyle().Foreground(colorMuted).Render("  ↑ more")}, cards[1:]...)
+		}
+		if cardEnd < len(col.issues) {
+			cards = append(cards, lipgloss.NewStyle().Foreground(colorMuted).Render("  ↓ more"))
+		}
+
+		cardContent := lipgloss.JoinVertical(lipgloss.Left, cards...)
+
+		var colStyle lipgloss.Style
+		if active {
+			colStyle = styleColumnActive.Width(colContent).Height(h)
+		} else {
+			colStyle = styleColumn.Width(colContent).Height(h)
+		}
+		cols = append(cols, colStyle.Render(cardContent))
+	}
+
+	board := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
+
+	// If total visible columns < total columns, show navigation hint
+	if len(m.columns) > len(visibleCols) {
+		hint := fmt.Sprintf(" col %d/%d  ←→ to navigate ", m.colIdx+1, len(m.columns))
+		hintLine := lipgloss.NewStyle().Foreground(colorMuted).Render(hint)
+		board = lipgloss.JoinVertical(lipgloss.Left, board, hintLine)
+	}
+
+	return board
+}
+
+func renderCard(issue redmine.Issue, width int, selected bool) string {
+	// width = colContent-4 (caller subtracts column border+padding from colContent)
+	// card adds its own RoundedBorder(2) + PaddingLeft+Right(2) = 4
+	// so text area = width - 4, and card rendered width = width + 4 = colContent
+	inner := width - 4
+	if inner < 6 {
+		inner = 6
+	}
+
+	title := issue.Subject
+	if len(title) > inner {
+		title = title[:inner-1] + "…"
+	}
+	titleStr := lipgloss.NewStyle().Bold(selected).Foreground(colorText).Width(inner).Render(title)
+
+	projStr := styleProjectTag.Render(func() string {
+		p := issue.Project.Name
+		if len(p) > 12 {
+			p = p[:11] + "…"
+		}
+		return p
+	}())
+
+	pStyle := priorityStyle(issue.Priority.Name)
+	prioStr := pStyle.Render(priorityIcon(issue.Priority.Name) + " " + issue.Priority.Name)
+
+	dueLabel, dueStyle := dueDateStyle(issue.DueDate)
+
+	line2 := lipgloss.JoinHorizontal(lipgloss.Center, projStr, " ", prioStr)
+	if dueLabel != "" {
+		line2 = lipgloss.JoinHorizontal(lipgloss.Center, projStr, " ", prioStr, " ", dueStyle.Render(dueLabel))
+	}
+
+	lines := []string{titleStr, line2}
+
+	if issue.DoneRatio > 0 {
+		barW := inner - 5
+		if barW > 0 {
+			lines = append(lines, fmt.Sprintf("%3d%% %s", issue.DoneRatio, progressBar(issue.DoneRatio, barW)))
+		}
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	if selected {
+		return styleCardSelected.Width(width).Render(content)
+	}
+	return styleCard.Width(width).Render(content)
+}
+
+// ── Detail view ────────────────────────────────────────────────────────────────────────
+
+func (m Model) viewDetail() string {
+	if m.selected == nil {
+		return ""
+	}
+	w := m.windowWidth
+	if w == 0 {
+		w = 100
+	}
+
+	header := lipgloss.NewStyle().
+		Background(colorSurface).
+		Foreground(colorAccent).
+		Bold(true).
+		Width(w).
+		Padding(0, 2).
+		Render("◈ Issue Detail  " +
+			styleHelpDesc.Render("esc/q: back · s: status · t: time · y: copy · ↑↓: scroll"))
+
+	divider := lipgloss.NewStyle().Foreground(colorAccent).Render(strings.Repeat("-", w))
+
+	m.viewport.Width = w - 8
+	m.viewport.Height = m.windowHeight - 6
+	m.viewport.SetContent(renderDetail(m.selected, m.viewport.Width))
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		header, divider,
+		lipgloss.NewStyle().Padding(0, 2).Render(m.viewport.View()),
+	)
+}
+
+func renderDetail(issue *redmine.Issue, width int) string {
+	label := styleDetailLabel.Render
+	val := lipgloss.NewStyle().Foreground(colorText).Render
+
+	title := styleDetailTitle.Render(fmt.Sprintf("[#%d] %s", issue.ID, issue.Subject))
+
+	pStyle := priorityStyle(issue.Priority.Name)
+	prio := pStyle.Render(priorityIcon(issue.Priority.Name) + " " + issue.Priority.Name)
+
+	dueLabel, dueStyle := dueDateStyle(issue.DueDate)
+	due := val("—")
+	if dueLabel != "" {
+		due = dueStyle.Render(dueLabel)
+	}
+
+	bar := ""
+	if issue.DoneRatio > 0 {
+		bar = fmt.Sprintf("%d%% %s", issue.DoneRatio, progressBar(issue.DoneRatio, 20))
+	}
+
+	meta := lipgloss.JoinVertical(lipgloss.Left,
+		fmt.Sprintf("%s %s    %s %s    %s %s",
+			label("Project:"), styleProjectTag.Render(issue.Project.Name),
+			label("Status:"), styleTag.Render(issue.Status.Name),
+			label("Tracker:"), val(issue.Tracker.Name),
+		),
+		fmt.Sprintf("%s %s    %s %s    %s %s",
+			label("Priority:"), prio,
+			label("Due:"), due,
+			label("Author:"), val(issue.Author.Name),
+		),
+		fmt.Sprintf("%s %s    %s %s",
+			label("Created:"), val(issue.CreatedOn.Format("2006-01-02 15:04")),
+			label("Updated:"), val(issue.UpdatedOn.Format("2006-01-02 15:04")),
+		),
+	)
+	if bar != "" {
+		meta += "\n" + label("Progress: ") + bar
+	}
+
+	divider := lipgloss.NewStyle().Foreground(colorBorder).Render(strings.Repeat("-", width-4))
+
+	// Strip Windows-style CRLF from Redmine API responses
+	cleanDesc := strings.ReplaceAll(issue.Description, "\r\n", "\n")
+	cleanDesc = strings.ReplaceAll(cleanDesc, "\r", "\n")
+	desc := lipgloss.NewStyle().Foreground(colorText).Render(cleanDesc)
+	if issue.Description == "" {
+		desc = lipgloss.NewStyle().Foreground(colorMuted).Italic(true).Render("(no description)")
+	}
+
+	sections := []string{title, meta, divider, label("Description:") + "\n" + desc}
+
+	hasJournals := false
+	for _, j := range issue.Journals {
+		if j.Notes != "" {
+			hasJournals = true
+			break
+		}
+	}
+	if hasJournals {
+		sections = append(sections, divider, label("History:"))
+		for _, j := range issue.Journals {
+			if j.Notes == "" {
+				continue
+			}
+			// Clean CRLF, then render header and body independently
+			notes := strings.ReplaceAll(j.Notes, "\r\n", "\n")
+			notes = strings.ReplaceAll(notes, "\r", "\n")
+			who := lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Render(j.User.Name)
+			when := lipgloss.NewStyle().Foreground(colorMuted).Render(j.CreatedOn.Format("2006-01-02 15:04"))
+			headerLine := who + "  " + when
+			noteBody := lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render(notes)
+			entry := lipgloss.JoinVertical(lipgloss.Left, headerLine, noteBody)
+			sections = append(sections, entry)
+		}
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+// ── Status picker ─────────────────────────────────────────────────────────────────
+
+func (m Model) viewStatusPicker() string {
+	w := m.windowWidth
+	if w == 0 {
+		w = 100
+	}
+
+	header := lipgloss.NewStyle().
+		Background(colorSurface).
+		Foreground(colorPurple).
+		Bold(true).
+		Width(w).
+		Padding(0, 2).
+		Render("◈ Change Status  " + styleHelpDesc.Render("←→: select · enter: apply · esc: back"))
+	divider := lipgloss.NewStyle().Foreground(colorPurple).Render(strings.Repeat("─", w))
+
+	title := ""
+	if m.selected != nil {
+		title = lipgloss.NewStyle().
+			Foreground(colorText).
+			PaddingLeft(2).
+			Render(fmt.Sprintf("#%d %s", m.selected.ID, m.selected.Subject))
+	}
+
+	cards := []string{}
+	for i, st := range m.statuses {
+		active := i == m.colIdx
+		var card string
+		if active {
+			card = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorPurple).
+				Foreground(colorPurple).
+				Bold(true).
+				Padding(1, 2).
+				Render("● " + st.Name)
+		} else {
+			card = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorBorder).
+				Foreground(colorMuted).
+				Padding(1, 2).
+				Render("○ " + st.Name)
+		}
+		cards = append(cards, card)
+	}
+
+	board := lipgloss.NewStyle().PaddingLeft(2).PaddingTop(1).
+		Render(lipgloss.JoinHorizontal(lipgloss.Top, cards...))
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, divider, title, board)
+}
+
+// ── Time input ─────────────────────────────────────────────────────────────────────
+
+func (m Model) viewTimeInput() string {
+	w := m.windowWidth
+	if w == 0 {
+		w = 80
+	}
+
+	header := lipgloss.NewStyle().
+		Background(colorSurface).
+		Foreground(colorInfo).
+		Bold(true).
+		Width(w).
+		Padding(0, 2).
+		Render("◈ Log Time  " + styleHelpDesc.Render("enter: next · esc: back"))
+	divider := lipgloss.NewStyle().Foreground(colorInfo).Render(strings.Repeat("─", w))
+
+	step := "Step 1/2: Hours"
+	if m.inputState == 1 {
+		step = "Step 2/2: Comments"
+	}
+
+	panel := styleInputPanel.Render(
+		lipgloss.NewStyle().Foreground(colorInfo).Bold(true).Render(step) + "\n\n" +
+			m.textInput.View(),
+	)
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		header, divider,
+		lipgloss.NewStyle().Padding(2, 4).Render(panel),
+	)
+}
+
+// ── Search ───────────────────────────────────────────────────────────────────────────
+
+func (m Model) viewSearch() string {
+	w := m.windowWidth
+	if w == 0 {
+		w = 80
+	}
+
+	header := lipgloss.NewStyle().
+		Background(colorSurface).
+		Foreground(colorWarn).
+		Bold(true).
+		Width(w).
+		Padding(0, 2).
+		Render("◈ Search Issues  " + styleHelpDesc.Render("enter: search · esc: cancel"))
+	divider := lipgloss.NewStyle().Foreground(colorWarn).Render(strings.Repeat("─", w))
+
+	panel := styleInputPanel.
+		BorderForeground(colorWarn).
+		Render(
+			lipgloss.NewStyle().Foreground(colorWarn).Bold(true).Render("Search description:") + "\n\n" +
+				m.textInput.View(),
+		)
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		header, divider,
+		lipgloss.NewStyle().Padding(2, 4).Render(panel),
+	)
+}
+
+// ── Commands ────────────────────────────────────────────────────────────────────────
 
 func (m Model) fetchIssues() tea.Msg {
 	issues, err := m.client.GetAssignedIssues()
 	if err != nil {
 		return err
 	}
-	return issues
+	return issuesMsg{issues: issues, loaded: true}
+}
+
+func (m Model) fetchStatuses() tea.Msg {
+	statuses, err := m.client.GetIssueStatuses()
+	if err != nil {
+		return err
+	}
+	return statuses
 }
 
 func (m Model) fetchIssueDetails(id int) tea.Cmd {
@@ -557,28 +1199,18 @@ func (m Model) fetchIssueDetails(id int) tea.Cmd {
 	}
 }
 
-func (m Model) fetchStatuses() tea.Msg {
-	statuses, err := m.client.GetIssueStatuses()
-	if err != nil {
-		return err
-	}
-	return statuses
-}
-
 func (m Model) updateStatus(issueID, statusID int) tea.Cmd {
 	return func() tea.Msg {
-		err := m.client.UpdateIssueStatus(issueID, statusID)
-		if err != nil {
+		if err := m.client.UpdateIssueStatus(issueID, statusID); err != nil {
 			return err
 		}
 		return "status_updated"
 	}
 }
 
-func (m Model) logTime(issueID int, hours string, comments string) tea.Cmd {
+func (m Model) logTime(issueID int, hours, comments string) tea.Cmd {
 	return func() tea.Msg {
-		err := m.client.LogTime(issueID, hours, comments)
-		if err != nil {
+		if err := m.client.LogTime(issueID, hours, comments); err != nil {
 			return err
 		}
 		return "time_logged"
@@ -591,21 +1223,119 @@ func (m Model) searchIssues(query string) tea.Cmd {
 		if err != nil {
 			return err
 		}
-		return issues
+		return issuesMsg{issues: issues, loaded: true}
 	}
 }
 
 func (m Model) syncPlanka() tea.Cmd {
 	return func() tea.Msg {
-		plankaClient := planka.NewClient(m.cfg.Planka.BaseURL, m.cfg.Planka.Username, m.cfg.Planka.Password)
-		if err := plankaClient.Login(); err != nil {
-			return fmt.Errorf("planka login failed: %w", err)
+		pc := planka.NewClient(m.cfg.Planka.BaseURL, m.cfg.Planka.Username, m.cfg.Planka.Password)
+		if err := pc.Login(); err != nil {
+			return fmt.Errorf("planka login: %w", err)
 		}
-
-		if err := sync.SyncIssuesToPlanka(m.client, plankaClient, m.cfg); err != nil {
+		if err := sync.SyncIssuesToPlanka(m.client, pc, m.cfg); err != nil {
 			return err
 		}
-
 		return "planka_synced"
+	}
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────────────
+
+func (m Model) exportToHTML() error {
+	f, err := os.Create("redmine_issues.html")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	html := `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Redmine Issues</title>
+<style>
+body{font-family:sans-serif;padding:20px;background:#1a1a2e;color:#e8e8f0}
+.board{display:flex;gap:16px;overflow-x:auto;padding-bottom:16px}
+.col{background:#16213e;border-radius:8px;padding:12px;min-width:280px;flex-shrink:0}
+.col h3{margin:0 0 12px;font-size:14px;color:#7c6fff;border-bottom:2px solid #7c6fff;padding-bottom:6px}
+.card{background:#0f3460;border:1px solid #2a2a4a;border-radius:6px;padding:10px;margin-bottom:8px;cursor:pointer;transition:box-shadow .15s}
+.card:hover{box-shadow:0 2px 8px rgba(124,111,255,.3);border-color:#7c6fff}
+.card h4{margin:0 0 6px;font-size:13px;color:#e8e8f0}
+.tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;color:#fff;background:#3b82f6;margin-right:4px}
+.prio-urgent{color:#f87171;font-weight:bold}.prio-high{color:#fbbf24;font-weight:bold}
+.prio-normal{color:#60a5fa}.prio-low{color:#6060a0}
+.due{font-size:11px;color:#6060a0;margin-top:4px}
+.due.overdue{color:#f87171;font-weight:bold}
+.progress{height:4px;background:#2a2a4a;border-radius:2px;margin-top:6px}
+.progress-fill{height:100%;background:#7c6fff;border-radius:2px}
+</style>
+</head>
+<body>
+<h2 style="color:#7c6fff">Redmine Kanban</h2>
+<div class="board">
+`
+
+	cols := map[string][]redmine.Issue{}
+	order := []string{}
+	for _, issue := range m.allIssues {
+		if _, ok := cols[issue.Status.Name]; !ok {
+			order = append(order, issue.Status.Name)
+		}
+		cols[issue.Status.Name] = append(cols[issue.Status.Name], issue)
+	}
+	for _, status := range order {
+		issues := cols[status]
+		html += fmt.Sprintf(`<div class="col"><h3>%s <span style="color:#6060a0;font-weight:normal">(%d)</span></h3>`, status, len(issues))
+		for _, issue := range issues {
+			pClass := "prio-low"
+			switch strings.ToLower(issue.Priority.Name) {
+			case "acil", "urgent":
+				pClass = "prio-urgent"
+			case "yüksek", "high":
+				pClass = "prio-high"
+			case "normal":
+				pClass = "prio-normal"
+			}
+			due := ""
+			if issue.DueDate != "" {
+				dueClass := "due"
+				t, err := time.Parse("2006-01-02", issue.DueDate)
+				if err == nil && t.Before(time.Now()) {
+					dueClass = "due overdue"
+				}
+				due = fmt.Sprintf(`<div class="%s">Due: %s</div>`, dueClass, issue.DueDate)
+			}
+			bar := ""
+			if issue.DoneRatio > 0 {
+				bar = fmt.Sprintf(`<div class="progress"><div class="progress-fill" style="width:%d%%"></div></div>`, issue.DoneRatio)
+			}
+			html += fmt.Sprintf(`
+<div class="card">
+  <h4>#%d %s</h4>
+  <span class="tag">%s</span><span class="%s">▲ %s</span>
+  %s%s
+</div>`, issue.ID, issue.Subject, issue.Project.Name, pClass, issue.Priority.Name, due, bar)
+		}
+		html += "</div>"
+	}
+
+	html += `</div></body></html>`
+	if _, err := f.WriteString(html); err != nil {
+		return err
+	}
+	return openBrowser("redmine_issues.html")
+}
+
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "linux":
+		return exec.Command("xdg-open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		return exec.Command("open", url).Start()
+	default:
+		return fmt.Errorf("unsupported platform")
 	}
 }
