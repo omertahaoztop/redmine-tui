@@ -13,11 +13,12 @@ type Config struct {
 }
 
 type Planka struct {
-	BaseURL  string `mapstructure:"base_url"`
-	Username string `mapstructure:"username"`
-	Password string `mapstructure:"password"`
-	BoardID  string `mapstructure:"board_id"`
-	ListID   string `mapstructure:"list_id"`
+	BaseURL      string `mapstructure:"base_url"`
+	Username     string `mapstructure:"username"`
+	Password     string `mapstructure:"password"`
+	BoardID      string `mapstructure:"board_id"`
+	ListID       string `mapstructure:"list_id"`
+	ClosedListID string `mapstructure:"closed_list_id"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -37,6 +38,7 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("planka.password", "PLANKA_PASSWORD")
 	viper.BindEnv("planka.board_id", "PLANKA_BOARD_ID")
 	viper.BindEnv("planka.list_id", "PLANKA_LIST_ID")
+	viper.BindEnv("planka.closed_list_id", "PLANKA_CLOSED_LIST_ID")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
@@ -74,6 +76,9 @@ func LoadConfig() (*Config, error) {
 	}
 	if config.Planka.ListID == "" {
 		config.Planka.ListID = viper.GetString("planka.list_id")
+	}
+	if config.Planka.ClosedListID == "" {
+		config.Planka.ClosedListID = viper.GetString("planka.closed_list_id")
 	}
 	// Also ensure defaults for Board/List IDs if configured via env vars but not bound explicitly above (if user added them to env)
 	// But we only bound base_url, username, password. The IDs are usually in config file or not bound.

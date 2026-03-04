@@ -169,3 +169,33 @@ func (c *Client) DeleteCard(cardID string) error {
 	}
 	return nil
 }
+
+func (c *Client) MoveCard(cardID, targetListID string) error {
+	url := fmt.Sprintf("%s/cards/%s", c.BaseURL, cardID)
+
+	payload := map[string]interface{}{
+		"listId": targetListID,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("move card failed with status: %d", resp.StatusCode)
+	}
+	return nil
+}
