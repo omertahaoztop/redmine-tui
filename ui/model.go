@@ -120,28 +120,49 @@ var (
 // ── Priority / due helpers ─────────────────────────────────────────────────────
 
 func priorityStyle(name string) lipgloss.Style {
-	switch strings.ToLower(name) {
-	case "acil", "urgent", "immediate":
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case strings.Contains(n, "kritik"):
 		return stylePriorityUrgent
-	case "yüksek", "high":
+	case strings.Contains(n, "yüksek") || strings.Contains(n, "high"):
 		return stylePriorityHigh
-	case "normal":
+	case n == "normal" || strings.Contains(n, "orta"):
 		return stylePriorityNormal
+	case strings.Contains(n, "düşük") || strings.Contains(n, "low") || strings.Contains(n, "belirsiz"):
+		return stylePriorityLow
 	default:
 		return stylePriorityLow
 	}
 }
 
 func priorityIcon(name string) string {
-	switch strings.ToLower(name) {
-	case "acil", "urgent", "immediate":
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case strings.Contains(n, "kritik"):
 		return "▲▲"
-	case "yüksek", "high":
+	case strings.Contains(n, "yüksek") || strings.Contains(n, "high"):
 		return "▲"
-	case "normal":
+	case n == "normal" || strings.Contains(n, "orta"):
 		return "●"
+	case strings.Contains(n, "düşük") || strings.Contains(n, "low") || strings.Contains(n, "belirsiz"):
+		return "▽"
 	default:
 		return "▽"
+	}
+}
+
+func trackerIcon(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "bug", "hata":
+		return "🐞 "
+	case "feature", "özellik", "yeni özellik":
+		return "✨ "
+	case "support", "destek":
+		return "🛋 "
+	case "task", "görev":
+		return "☑ "
+	default:
+		return ""
 	}
 }
 
@@ -222,7 +243,8 @@ type Model struct {
 	windowWidth  int
 	windowHeight int
 
-	statusMsg string
+	statusMsg     string
+	statusIsError bool
 }
 
 type kanbanColumn struct {
@@ -527,18 +549,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg {
 		case "status_updated":
 			m.statusMsg = "Status updated!"
+			m.statusIsError = false
 			return m, tea.Batch(m.fetchIssues, m.fetchStatuses)
 		case "time_logged":
 			m.statusMsg = "Time logged!"
+			m.statusIsError = false
 		case "planka_synced":
 			m.statusMsg = "Synced with Planka!"
+			m.statusIsError = false
 		default:
 			m.statusMsg = msg
+			m.statusIsError = false
 		}
 
 	case error:
-		m.err = msg
-		return m, tea.Quit
+		// Non-fatal errors go to status bar; fatal startup errors quit
+		if !m.loaded {
+			m.err = msg
+			return m, tea.Quit
+		}
+		m.statusMsg = msg.Error()
+		m.statusIsError = true
 	}
 
 	return m, cmd
@@ -766,8 +797,13 @@ func (m Model) renderFooter(w int) string {
 
 	lines := []string{divider}
 	if m.statusMsg != "" {
-		lines = append(lines,
-			lipgloss.NewStyle().Foreground(colorSuccess).PaddingLeft(2).Render("✓ "+m.statusMsg))
+		var statusLine string
+		if m.statusIsError {
+			statusLine = lipgloss.NewStyle().Foreground(colorDanger).PaddingLeft(2).Render("✗ "+m.statusMsg)
+		} else {
+			statusLine = lipgloss.NewStyle().Foreground(colorSuccess).PaddingLeft(2).Render("✓ "+m.statusMsg)
+		}
+		lines = append(lines, statusLine)
 	}
 	lines = append(lines, lipgloss.NewStyle().PaddingLeft(2).Render(help))
 
@@ -819,20 +855,12 @@ func (m Model) renderBoard(w, h int) string {
 	}
 	visibleCols := m.columns[visStart:visEnd]
 
-	// card: border(2) + title(1) + meta(1) + maybe bar(1) = ~5 lines content + 2 border = 7
-	cardH := 7
-	maxCards := (h - 3) / cardH
-	if maxCards < 1 {
-		maxCards = 1
-	}
-
 	cols := []string{}
 	for ci, col := range visibleCols {
 		globalIdx := visStart + ci
 		active := globalIdx == m.colIdx
 
 		count := styleCountBadge.Render(fmt.Sprintf("%d", len(col.issues)))
-		// NormalBorder adds PaddingLeft+Right(1) each side = 2; so header inner = colContent-2
 		headerInner := colContent - 2
 		if headerInner < 4 {
 			headerInner = 4
@@ -845,26 +873,60 @@ func (m Model) renderBoard(w, h int) string {
 			header = styleColumnHeader.Width(headerInner).Render(headerText)
 		}
 
-		cardStart := 0
-		if active && m.cardIdx >= maxCards {
-			cardStart = m.cardIdx - maxCards + 1
+		// Available card area = board height minus this column's real header height.
+		availH := h - lipgloss.Height(header)
+		if availH < 1 {
+			availH = 1
 		}
-		cardEnd := cardStart + maxCards
-		if cardEnd > len(col.issues) {
-			cardEnd = len(col.issues)
+
+		// Pre-render all cards to know their heights.
+		type cardEntry struct {
+			rendered string
+			height   int
+		}
+		all := make([]cardEntry, len(col.issues))
+		for i, issue := range col.issues {
+			selectedCard := active && i == m.cardIdx
+			r := renderCard(issue, colContent-4, selectedCard)
+			all[i] = cardEntry{r, lipgloss.Height(r)}
+		}
+
+		// Find the scroll window: binary-search for the smallest cardStart
+		// such that cards[cardStart..cardIdx] fit within availH.
+		cardStart := 0
+		if active && m.cardIdx < len(all) {
+			// Walk backwards from cardIdx, accumulating height.
+			usedH := 0
+			for i := m.cardIdx; i >= 0; i-- {
+				usedH += all[i].height
+				if usedH > availH {
+					cardStart = i + 1
+					break
+				}
+			}
+		}
+
+		// Fill forward from cardStart until availH is exhausted.
+		usedH := 0
+		cardEnd := cardStart
+		for i := cardStart; i < len(all); i++ {
+			if usedH+all[i].height > availH {
+				break
+			}
+			usedH += all[i].height
+			cardEnd = i + 1
+		}
+		if cardEnd == cardStart && cardStart < len(all) {
+			// At minimum show one card even if it overflows.
+			cardEnd = cardStart + 1
 		}
 
 		cards := []string{header}
-		for i := cardStart; i < cardEnd; i++ {
-			issue := col.issues[i]
-			selectedCard := active && i == m.cardIdx
-			// renderCard receives colContent; card adds its own border+padding internally
-			cards = append(cards, renderCard(issue, colContent-4, selectedCard))
-		}
-
-		// Scroll indicators
 		if cardStart > 0 {
-			cards = append([]string{lipgloss.NewStyle().Foreground(colorMuted).Render("  ↑ more")}, cards[1:]...)
+			cards = append(cards, lipgloss.NewStyle().Foreground(colorMuted).Render("  ↑ more"))
+		}
+		for i := cardStart; i < cardEnd; i++ {
+			cards = append(cards, all[i].rendered)
 		}
 		if cardEnd < len(col.issues) {
 			cards = append(cards, lipgloss.NewStyle().Foreground(colorMuted).Render("  ↓ more"))
@@ -874,9 +936,9 @@ func (m Model) renderBoard(w, h int) string {
 
 		var colStyle lipgloss.Style
 		if active {
-			colStyle = styleColumnActive.Width(colContent).Height(h)
+			colStyle = styleColumnActive.Width(colContent).Height(h).MaxHeight(h)
 		} else {
-			colStyle = styleColumn.Width(colContent).Height(h)
+			colStyle = styleColumn.Width(colContent).Height(h).MaxHeight(h)
 		}
 		cols = append(cols, colStyle.Render(cardContent))
 	}
@@ -902,11 +964,21 @@ func renderCard(issue redmine.Issue, width int, selected bool) string {
 		inner = 6
 	}
 
-	title := issue.Subject
-	if len(title) > inner {
-		title = title[:inner-1] + "…"
+	// Title line: truncate to leave room, prefix with #ID
+	idPrefix := fmt.Sprintf("#%d ", issue.ID)
+	titleMax := inner - len(idPrefix)
+	if titleMax < 4 {
+		titleMax = 4
 	}
-	titleStr := lipgloss.NewStyle().Bold(selected).Foreground(colorText).Width(inner).Render(title)
+	title := issue.Subject
+	if len(title) > titleMax {
+		title = title[:titleMax-1] + "…"
+	}
+	idStr := lipgloss.NewStyle().Foreground(colorMuted).Render(idPrefix)
+	titleStr := lipgloss.JoinHorizontal(lipgloss.Top,
+		idStr,
+		lipgloss.NewStyle().Bold(selected).Foreground(colorText).Render(title),
+	)
 
 	projStr := styleProjectTag.Render(func() string {
 		p := issue.Project.Name
@@ -994,11 +1066,16 @@ func renderDetail(issue *redmine.Issue, width int) string {
 		bar = fmt.Sprintf("%d%% %s", issue.DoneRatio, progressBar(issue.DoneRatio, 20))
 	}
 
+	assignee := val("—")
+	if issue.AssignedTo.Name != "" {
+		assignee = val(issue.AssignedTo.Name)
+	}
+
 	meta := lipgloss.JoinVertical(lipgloss.Left,
 		fmt.Sprintf("%s %s    %s %s    %s %s",
 			label("Project:"), styleProjectTag.Render(issue.Project.Name),
 			label("Status:"), styleTag.Render(issue.Status.Name),
-			label("Tracker:"), val(issue.Tracker.Name),
+			label("Tracker:"), val(trackerIcon(issue.Tracker.Name)+issue.Tracker.Name),
 		),
 		fmt.Sprintf("%s %s    %s %s    %s %s",
 			label("Priority:"), prio,
@@ -1006,7 +1083,10 @@ func renderDetail(issue *redmine.Issue, width int) string {
 			label("Author:"), val(issue.Author.Name),
 		),
 		fmt.Sprintf("%s %s    %s %s",
+			label("Assignee:"), assignee,
 			label("Created:"), val(issue.CreatedOn.Format("2006-01-02 15:04")),
+		),
+		fmt.Sprintf("%s %s",
 			label("Updated:"), val(issue.UpdatedOn.Format("2006-01-02 15:04")),
 		),
 	)
