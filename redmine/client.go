@@ -262,30 +262,47 @@ func (c *Client) LogTime(issueID int, hours string, comments string) error {
 }
 
 func (c *Client) SearchIssues(query string) ([]Issue, error) {
-	url := fmt.Sprintf("%s/issues.json?assigned_to_id=me&status_id=open&limit=100&description=~%s", c.Host, query)
+	subjectURL := fmt.Sprintf("%s/issues.json?assigned_to_id=me&status_id=open&limit=100&subject=~%s", c.Host, query)
+	descURL := fmt.Sprintf("%s/issues.json?assigned_to_id=me&status_id=open&limit=100&description=~%s", c.Host, query)
 
-	req, err := http.NewRequest("GET", url, nil)
+	fetch := func(url string) ([]Issue, error) {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("X-Redmine-API-Key", c.APIKey)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := c.Client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
+		}
+		var result IssuesResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, err
+		}
+		return result.Issues, nil
+	}
+
+	subjectIssues, err := fetch(subjectURL)
 	if err != nil {
 		return nil, err
 	}
-
-	req.Header.Set("X-Redmine-API-Key", c.APIKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.Client.Do(req)
+	descIssues, err := fetch(descURL)
 	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
+		return subjectIssues, nil
 	}
 
-	var result IssuesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+	seen := make(map[int]bool)
+	var merged []Issue
+	for _, issue := range append(subjectIssues, descIssues...) {
+		if !seen[issue.ID] {
+			seen[issue.ID] = true
+			merged = append(merged, issue)
+		}
 	}
-
-	return result.Issues, nil
+	return merged, nil
 }
