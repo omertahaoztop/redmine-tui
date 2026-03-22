@@ -3,35 +3,33 @@ package sync
 import (
 	"fmt"
 	"redmine-tui/config"
-	"redmine-tui/planka"
 	"redmine-tui/redmine"
+	"redmine-tui/vikunja"
 )
 
-func SyncIssuesToPlanka(redmineClient *redmine.Client, plankaClient *planka.Client, cfg *config.Config) error {
+func SyncIssuesToVikunja(redmineClient *redmine.Client, vikunjaClient *vikunja.Client, cfg *config.Config) error {
 	issues, err := redmineClient.GetAssignedIssues()
 	if err != nil {
 		return fmt.Errorf("failed to fetch redmine issues: %w", err)
 	}
 
-	cards, err := plankaClient.GetCards(cfg.Planka.BoardID, cfg.Planka.ListID)
+	viewID := cfg.Vikunja.ViewID
+	if viewID == 0 {
+		view, err := vikunjaClient.FindKanbanView(cfg.Vikunja.ProjectID)
+		if err != nil {
+			return fmt.Errorf("failed to find kanban view: %w", err)
+		}
+		viewID = view.ID
+	}
+
+	tasks, err := vikunjaClient.GetTasks(cfg.Vikunja.ProjectID, viewID)
 	if err != nil {
-		return fmt.Errorf("failed to fetch planka cards: %w", err)
+		return fmt.Errorf("failed to fetch vikunja tasks: %w", err)
 	}
 
-	// Also fetch closed list cards so we don't re-add already-moved cards.
-	var closedCards []planka.Card
-	if cfg.Planka.ClosedListID != "" {
-		closedCards, _ = plankaClient.GetCards(cfg.Planka.BoardID, cfg.Planka.ClosedListID)
-	}
-
-	plankaMap := make(map[string]string)
-	for _, card := range cards {
-		plankaMap[card.Name] = card.ID
-	}
-
-	closedMap := make(map[string]string)
-	for _, card := range closedCards {
-		closedMap[card.Name] = card.ID
+	vikunjaMap := make(map[string]vikunja.Task)
+	for _, task := range tasks {
+		vikunjaMap[task.Title] = task
 	}
 
 	redmineMap := make(map[string]redmine.Issue)
@@ -40,29 +38,26 @@ func SyncIssuesToPlanka(redmineClient *redmine.Client, plankaClient *planka.Clie
 	}
 
 	for subject := range redmineMap {
-		if _, exists := plankaMap[subject]; !exists {
-			if id, inClosed := closedMap[subject]; inClosed && cfg.Planka.ClosedListID != "" {
-				// Issue reopened — move back to active list.
-				if err := plankaClient.MoveCard(id, cfg.Planka.ListID); err != nil {
-					return fmt.Errorf("failed to move card '%s' to active list: %w", subject, err)
-				}
-			} else {
-				if err := plankaClient.CreateCard(cfg.Planka.BoardID, cfg.Planka.ListID, subject); err != nil {
-					return fmt.Errorf("failed to create card '%s': %w", subject, err)
-				}
+		if task, exists := vikunjaMap[subject]; !exists {
+			if err := vikunjaClient.CreateTask(cfg.Vikunja.ProjectID, viewID, cfg.Vikunja.BucketID, subject); err != nil {
+				return fmt.Errorf("failed to create task '%s': %w", subject, err)
+			}
+		} else if task.Done {
+			if err := vikunjaClient.MoveTask(cfg.Vikunja.ProjectID, viewID, task.ID, cfg.Vikunja.BucketID); err != nil {
+				return fmt.Errorf("failed to reopen task '%s': %w", subject, err)
 			}
 		}
 	}
 
-	for name, id := range plankaMap {
-		if _, exists := redmineMap[name]; !exists {
-			if cfg.Planka.ClosedListID != "" {
-				if err := plankaClient.MoveCard(id, cfg.Planka.ClosedListID); err != nil {
-					return fmt.Errorf("failed to move card '%s' to closed list: %w", name, err)
+	for title, task := range vikunjaMap {
+		if _, exists := redmineMap[title]; !exists && !task.Done {
+			if cfg.Vikunja.DoneBucketID != 0 {
+				if err := vikunjaClient.MoveTask(cfg.Vikunja.ProjectID, viewID, task.ID, cfg.Vikunja.DoneBucketID); err != nil {
+					return fmt.Errorf("failed to move task '%s' to done bucket: %w", title, err)
 				}
 			} else {
-				if err := plankaClient.DeleteCard(id); err != nil {
-					return fmt.Errorf("failed to delete card '%s': %w", name, err)
+				if err := vikunjaClient.DeleteTask(task.ID); err != nil {
+					return fmt.Errorf("failed to delete task '%s': %w", title, err)
 				}
 			}
 		}

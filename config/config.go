@@ -7,18 +7,20 @@ import (
 )
 
 type Config struct {
-	APIKey string `mapstructure:"api_key"`
-	Host   string `mapstructure:"host"`
-	Planka Planka `mapstructure:"planka"`
+	APIKey  string  `mapstructure:"api_key"`
+	Host    string  `mapstructure:"host"`
+	Vikunja Vikunja `mapstructure:"vikunja"`
 }
 
-type Planka struct {
+type Vikunja struct {
 	BaseURL      string `mapstructure:"base_url"`
+	Token        string `mapstructure:"token"`
 	Username     string `mapstructure:"username"`
 	Password     string `mapstructure:"password"`
-	BoardID      string `mapstructure:"board_id"`
-	ListID       string `mapstructure:"list_id"`
-	ClosedListID string `mapstructure:"closed_list_id"`
+	ProjectID    int64  `mapstructure:"project_id"`
+	ViewID       int64  `mapstructure:"view_id"`
+	BucketID     int64  `mapstructure:"bucket_id"`
+	DoneBucketID int64  `mapstructure:"done_bucket_id"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -26,30 +28,27 @@ func LoadConfig() (*Config, error) {
 	viper.AddConfigPath(".")
 	viper.AddConfigPath("/etc/default")
 
-	// Try .redmine-tui first (standard for home dir)
 	viper.SetConfigName(".redmine-tui")
 	viper.SetConfigType("yaml")
 
-	// Bind environment variables
 	viper.BindEnv("api_key", "REDMINE_API_KEY")
 	viper.BindEnv("host", "REDMINE_HOST")
-	viper.BindEnv("planka.base_url", "PLANKA_API_URL")
-	viper.BindEnv("planka.username", "PLANKA_USERNAME")
-	viper.BindEnv("planka.password", "PLANKA_PASSWORD")
-	viper.BindEnv("planka.board_id", "PLANKA_BOARD_ID")
-	viper.BindEnv("planka.list_id", "PLANKA_LIST_ID")
-	viper.BindEnv("planka.closed_list_id", "PLANKA_CLOSED_LIST_ID")
+	viper.BindEnv("vikunja.base_url", "VIKUNJA_API_URL")
+	viper.BindEnv("vikunja.token", "VIKUNJA_TOKEN")
+	viper.BindEnv("vikunja.username", "VIKUNJA_USERNAME")
+	viper.BindEnv("vikunja.password", "VIKUNJA_PASSWORD")
+	viper.BindEnv("vikunja.project_id", "VIKUNJA_PROJECT_ID")
+	viper.BindEnv("vikunja.view_id", "VIKUNJA_VIEW_ID")
+	viper.BindEnv("vikunja.bucket_id", "VIKUNJA_BUCKET_ID")
+	viper.BindEnv("vikunja.done_bucket_id", "VIKUNJA_DONE_BUCKET_ID")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			// Try redmine-tui (standard for system config)
 			viper.SetConfigName("redmine-tui")
 			if err := viper.ReadInConfig(); err != nil {
-				// If still not found, check if it's really missing or another error
 				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 					return nil, fmt.Errorf("error reading config file: %w", err)
 				}
-				// If not found in either, that's fine, we might rely entirely on Env vars
 			}
 		} else {
 			return nil, fmt.Errorf("error reading config file: %w", err)
@@ -61,31 +60,30 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("unable to decode into struct: %w", err)
 	}
 
-	// Manually set Planka config if not populated (Viper Unmarshal sometimes misses Env vars for nested structs if keys missing in file)
-	if config.Planka.BaseURL == "" {
-		config.Planka.BaseURL = viper.GetString("planka.base_url")
+	if config.Vikunja.BaseURL == "" {
+		config.Vikunja.BaseURL = viper.GetString("vikunja.base_url")
 	}
-	if config.Planka.Username == "" {
-		config.Planka.Username = viper.GetString("planka.username")
+	if config.Vikunja.Token == "" {
+		config.Vikunja.Token = viper.GetString("vikunja.token")
 	}
-	if config.Planka.Password == "" {
-		config.Planka.Password = viper.GetString("planka.password")
+	if config.Vikunja.Username == "" {
+		config.Vikunja.Username = viper.GetString("vikunja.username")
 	}
-	if config.Planka.BoardID == "" {
-		config.Planka.BoardID = viper.GetString("planka.board_id")
+	if config.Vikunja.Password == "" {
+		config.Vikunja.Password = viper.GetString("vikunja.password")
 	}
-	if config.Planka.ListID == "" {
-		config.Planka.ListID = viper.GetString("planka.list_id")
+	if config.Vikunja.ProjectID == 0 {
+		config.Vikunja.ProjectID = viper.GetInt64("vikunja.project_id")
 	}
-	if config.Planka.ClosedListID == "" {
-		config.Planka.ClosedListID = viper.GetString("planka.closed_list_id")
+	if config.Vikunja.ViewID == 0 {
+		config.Vikunja.ViewID = viper.GetInt64("vikunja.view_id")
 	}
-	// Also ensure defaults for Board/List IDs if configured via env vars but not bound explicitly above (if user added them to env)
-	// But we only bound base_url, username, password. The IDs are usually in config file or not bound.
-	// Let's rely on config file for IDs or bind them if needed.
-	// The user walkthrough said "Credentials are loaded from environment variables ... or config file". IDs usually in config.
-
-	// Just in case, let's verify BoardID/ListID from config file map if struct missed it (unlikely if in file).
+	if config.Vikunja.BucketID == 0 {
+		config.Vikunja.BucketID = viper.GetInt64("vikunja.bucket_id")
+	}
+	if config.Vikunja.DoneBucketID == 0 {
+		config.Vikunja.DoneBucketID = viper.GetInt64("vikunja.done_bucket_id")
+	}
 
 	return &config, nil
 }

@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"os"
 	"redmine-tui/config"
-	"redmine-tui/planka"
 	"redmine-tui/redmine"
 	"redmine-tui/sync"
 	"redmine-tui/ui"
+	"redmine-tui/vikunja"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
-	syncMode := flag.Bool("sync", false, "Run in sync mode (headless) to sync Redmine issues to Planka")
+	syncMode := flag.Bool("sync", false, "Run in sync mode (headless) to sync Redmine issues to Vikunja")
 	flag.Parse()
 
 	cfg, err := config.LoadConfig()
@@ -43,19 +43,19 @@ func main() {
 }
 
 func runSync(cfg *config.Config) {
-	fmt.Println("Starting Redmine -> Planka Sync...")
+	fmt.Println("Starting Redmine -> Vikunja Sync...")
 
 	redmineClient := redmine.NewClient(cfg.APIKey, cfg.Host)
-	plankaClient := planka.NewClient(cfg.Planka.BaseURL, cfg.Planka.Username, cfg.Planka.Password)
+	vikunjaClient := vikunja.NewClient(cfg.Vikunja.BaseURL, cfg.Vikunja.Token, cfg.Vikunja.Username, cfg.Vikunja.Password)
 
-	fmt.Println("Logging into Planka...")
-	if err := plankaClient.Login(); err != nil {
-		fmt.Printf("Error logging into Planka: %v\n", err)
+	fmt.Println("Logging into Vikunja...")
+	if err := vikunjaClient.Login(); err != nil {
+		fmt.Printf("Error logging into Vikunja: %v\n", err)
 		os.Exit(1)
 	}
 
 	fmt.Println("Syncing issues...")
-	if err := sync.SyncIssuesToPlanka(redmineClient, plankaClient, cfg); err != nil {
+	if err := sync.SyncIssuesToVikunja(redmineClient, vikunjaClient, cfg); err != nil {
 		fmt.Printf("Error syncing: %v\n", err)
 		os.Exit(1)
 	}

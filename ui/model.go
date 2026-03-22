@@ -5,9 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"redmine-tui/config"
-	"redmine-tui/planka"
 	"redmine-tui/redmine"
 	"redmine-tui/sync"
+	"redmine-tui/vikunja"
 	"runtime"
 	"strings"
 	"time"
@@ -35,14 +35,14 @@ var (
 	colorPurple  = lipgloss.AdaptiveColor{Light: "#8b5cf6", Dark: "#a78bfa"}
 
 	styleColumnHeader = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorText).
-			Background(colorSurface).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderBottom(true).
-			BorderForeground(colorAccent).
-			PaddingLeft(1).
-			PaddingRight(1)
+				Bold(true).
+				Foreground(colorText).
+				Background(colorSurface).
+				BorderStyle(lipgloss.NormalBorder()).
+				BorderBottom(true).
+				BorderForeground(colorAccent).
+				PaddingLeft(1).
+				PaddingRight(1)
 
 	styleColumnHeaderActive = styleColumnHeader.
 				Foreground(colorAccent).
@@ -82,9 +82,9 @@ var (
 				Padding(1, 2)
 
 	styleInputPanel = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(colorPurple).
-				Padding(1, 2)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorPurple).
+			Padding(1, 2)
 
 	styleHelpKey  = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleHelpDesc = lipgloss.NewStyle().Foreground(colorMuted)
@@ -96,16 +96,16 @@ var (
 			PaddingRight(1)
 
 	styleProjectTag = lipgloss.NewStyle().
-				Foreground(colorSurface).
-				Background(colorInfo).
-				PaddingLeft(1).
-				PaddingRight(1)
+			Foreground(colorSurface).
+			Background(colorInfo).
+			PaddingLeft(1).
+			PaddingRight(1)
 
 	styleCountBadge = lipgloss.NewStyle().
-				Foreground(colorSurface).
-				Background(colorMuted).
-				PaddingLeft(1).
-				PaddingRight(1)
+			Foreground(colorSurface).
+			Background(colorMuted).
+			PaddingLeft(1).
+			PaddingRight(1)
 
 	stylePriorityUrgent = lipgloss.NewStyle().Foreground(colorDanger).Bold(true)
 	stylePriorityHigh   = lipgloss.NewStyle().Foreground(colorWarn).Bold(true)
@@ -515,9 +515,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.statusMsg = "Exported to redmine_issues.html"
 				}
-			case "p":
-				m.statusMsg = "Syncing with Planka..."
-				return m, m.syncPlanka()
+			case "v":
+				m.statusMsg = "Syncing with Vikunja..."
+				return m, m.syncVikunja()
 			}
 		}
 
@@ -554,8 +554,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "time_logged":
 			m.statusMsg = "Time logged!"
 			m.statusIsError = false
-		case "planka_synced":
-			m.statusMsg = "Synced with Planka!"
+		case "vikunja_synced":
+			m.statusMsg = "Synced with Vikunja!"
 			m.statusIsError = false
 		default:
 			m.statusMsg = msg
@@ -698,7 +698,7 @@ func (m Model) viewKanban() string {
 		return lipgloss.Place(
 			m.windowWidth, m.windowHeight,
 			lipgloss.Center, lipgloss.Center,
-			lipgloss.NewStyle().Foreground(colorAccent).Render("⦾")+ " Loading issues...",
+			lipgloss.NewStyle().Foreground(colorAccent).Render("⦾")+" Loading issues...",
 		)
 	}
 
@@ -783,7 +783,7 @@ func (m Model) renderFooter(w int) string {
 		{"←→", "col"}, {"↑↓", "card"}, {"↵", "detail"},
 		{"s", "status"}, {"t", "time"}, {"f", "filter"},
 		{"y", "copy"}, {"r", "refresh"}, {"e", "export"},
-		{"p", "planka"}, {"^f", "search"}, {"q", "quit"},
+		{"v", "vikunja"}, {"^f", "search"}, {"q", "quit"},
 	}
 	parts := []string{}
 	for _, kv := range keys {
@@ -799,9 +799,9 @@ func (m Model) renderFooter(w int) string {
 	if m.statusMsg != "" {
 		var statusLine string
 		if m.statusIsError {
-			statusLine = lipgloss.NewStyle().Foreground(colorDanger).PaddingLeft(2).Render("✗ "+m.statusMsg)
+			statusLine = lipgloss.NewStyle().Foreground(colorDanger).PaddingLeft(2).Render("✗ " + m.statusMsg)
 		} else {
-			statusLine = lipgloss.NewStyle().Foreground(colorSuccess).PaddingLeft(2).Render("✓ "+m.statusMsg)
+			statusLine = lipgloss.NewStyle().Foreground(colorSuccess).PaddingLeft(2).Render("✓ " + m.statusMsg)
 		}
 		lines = append(lines, statusLine)
 	}
@@ -1307,16 +1307,16 @@ func (m Model) searchIssues(query string) tea.Cmd {
 	}
 }
 
-func (m Model) syncPlanka() tea.Cmd {
+func (m Model) syncVikunja() tea.Cmd {
 	return func() tea.Msg {
-		pc := planka.NewClient(m.cfg.Planka.BaseURL, m.cfg.Planka.Username, m.cfg.Planka.Password)
-		if err := pc.Login(); err != nil {
-			return fmt.Errorf("planka login: %w", err)
+		vc := vikunja.NewClient(m.cfg.Vikunja.BaseURL, m.cfg.Vikunja.Token, m.cfg.Vikunja.Username, m.cfg.Vikunja.Password)
+		if err := vc.Login(); err != nil {
+			return fmt.Errorf("vikunja login: %w", err)
 		}
-		if err := sync.SyncIssuesToPlanka(m.client, pc, m.cfg); err != nil {
+		if err := sync.SyncIssuesToVikunja(m.client, vc, m.cfg); err != nil {
 			return err
 		}
-		return "planka_synced"
+		return "vikunja_synced"
 	}
 }
 
