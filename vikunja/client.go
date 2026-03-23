@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -12,10 +13,17 @@ import (
 // ── Types ────────────────────────────────────────────────────────────────────────────────
 
 type Task struct {
-	ID       int64  `json:"id"`
-	Title    string `json:"title"`
-	Done     bool   `json:"done"`
-	BucketID int64  `json:"bucket_id"`
+	ID        int64  `json:"id"`
+	Title     string `json:"title"`
+	Done      bool   `json:"done"`
+	BucketID  int64  `json:"bucket_id"`
+	ProjectID int64  `json:"project_id"`
+}
+
+type KanbanBucket struct {
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+	Tasks []Task `json:"tasks"`
 }
 
 type View struct {
@@ -169,26 +177,55 @@ func (c *Client) FindKanbanView(projectID int64) (*View, error) {
 
 // ── Tasks ────────────────────────────────────────────────────────────────────────────────
 
-// GetTasks fetches all tasks for a project view.
-func (c *Client) GetTasks(projectID, viewID int64) ([]Task, error) {
-	url := fmt.Sprintf("%s/projects/%d/views/%d/tasks", c.BaseURL, projectID, viewID)
+func (c *Client) GetBucketTasks(projectID, viewID, bucketID int64) ([]Task, error) {
+	var allTasks []Task
+	page := 1
+	const perPage = 50
 
-	resp, err := c.doRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
+	for {
+		url := fmt.Sprintf("%s/projects/%d/views/%d/tasks?page=%d&per_page=%d", c.BaseURL, projectID, viewID, page, perPage)
+
+		resp, err := c.doRequest("GET", url, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("failed to fetch tasks: %d", resp.StatusCode)
+		}
+
+		var buckets []KanbanBucket
+		if err := json.NewDecoder(resp.Body).Decode(&buckets); err != nil {
+			resp.Body.Close()
+			return nil, err
+		}
+
+		totalPagesStr := resp.Header.Get("X-Pagination-Total-Pages")
+		resp.Body.Close()
+
+		for _, b := range buckets {
+			if b.ID == bucketID {
+				allTasks = append(allTasks, b.Tasks...)
+				break
+			}
+		}
+
+		totalPages := 1
+		if totalPagesStr != "" {
+			if tp, err := strconv.Atoi(totalPagesStr); err == nil {
+				totalPages = tp
+			}
+		}
+
+		if page >= totalPages {
+			break
+		}
+
+		page++
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch tasks: %d", resp.StatusCode)
-	}
-
-	var tasks []Task
-	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
-		return nil, err
-	}
-
-	return tasks, nil
+	return allTasks, nil
 }
 
 // CreateTask creates a new task in the project and places it into the specified bucket.

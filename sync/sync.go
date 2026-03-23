@@ -22,14 +22,22 @@ func SyncIssuesToVikunja(redmineClient *redmine.Client, vikunjaClient *vikunja.C
 		viewID = view.ID
 	}
 
-	tasks, err := vikunjaClient.GetTasks(cfg.Vikunja.ProjectID, viewID)
+	bucketTasks, err := vikunjaClient.GetBucketTasks(cfg.Vikunja.ProjectID, viewID, cfg.Vikunja.BucketID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch vikunja tasks: %w", err)
 	}
 
+	tasksByTitle := make(map[string][]vikunja.Task)
+	for _, task := range bucketTasks {
+		tasksByTitle[task.Title] = append(tasksByTitle[task.Title], task)
+	}
+
 	vikunjaMap := make(map[string]vikunja.Task)
-	for _, task := range tasks {
-		vikunjaMap[task.Title] = task
+	for title, group := range tasksByTitle {
+		vikunjaMap[title] = group[0]
+		for _, t := range group[1:] {
+			_ = vikunjaClient.DeleteTask(t.ID)
+		}
 	}
 
 	redmineMap := make(map[string]redmine.Issue)
@@ -38,19 +46,15 @@ func SyncIssuesToVikunja(redmineClient *redmine.Client, vikunjaClient *vikunja.C
 	}
 
 	for subject := range redmineMap {
-		if task, exists := vikunjaMap[subject]; !exists {
+		if _, exists := vikunjaMap[subject]; !exists {
 			if err := vikunjaClient.CreateTask(cfg.Vikunja.ProjectID, viewID, cfg.Vikunja.BucketID, subject); err != nil {
 				return fmt.Errorf("failed to create task '%s': %w", subject, err)
-			}
-		} else if task.Done {
-			if err := vikunjaClient.MoveTask(cfg.Vikunja.ProjectID, viewID, task.ID, cfg.Vikunja.BucketID); err != nil {
-				return fmt.Errorf("failed to reopen task '%s': %w", subject, err)
 			}
 		}
 	}
 
 	for title, task := range vikunjaMap {
-		if _, exists := redmineMap[title]; !exists && !task.Done {
+		if _, exists := redmineMap[title]; !exists {
 			if cfg.Vikunja.DoneBucketID != 0 {
 				if err := vikunjaClient.MoveTask(cfg.Vikunja.ProjectID, viewID, task.ID, cfg.Vikunja.DoneBucketID); err != nil {
 					return fmt.Errorf("failed to move task '%s' to done bucket: %w", title, err)
