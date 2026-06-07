@@ -1,5 +1,9 @@
 # Redmine TUI
 
+[![CI](https://github.com/omertahaoztop/redmine-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/omertahaoztop/redmine-tui/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/omertahaoztop/redmine-tui)](https://goreportcard.com/report/github.com/omertahaoztop/redmine-tui)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A fast, modern Terminal User Interface (TUI) for [Redmine](https://www.redmine.org/), built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea). View assigned issues on a kanban board, log time, change status, filter, search, export to HTML, and sync assigned tasks to [Vikunja](https://vikunja.io/).
 
 ## Features
