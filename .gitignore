@@ -12,5 +12,9 @@ redmine_issues.html
 .vscode/
 .idea/
 
-# Local Config (if contains secrets)
+# Local config — contains secrets, never commit
+/.redmine-tui.yaml
+/redmine-tui.yaml
 
+# Agent/editor scratch
+.opencode/
