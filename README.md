@@ -1,60 +1,43 @@
 # Redmine TUI
 
-A Terminal User Interface (TUI) for Redmine, built with Go and Bubble Tea. This tool allows you to view assigned issues, log time, change issue status, filter by projects, search issues, and sync assigned tasks to Planka.
+A fast, modern Terminal User Interface (TUI) for [Redmine](https://www.redmine.org/), built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea). View assigned issues on a kanban board, log time, change status, filter, search, export to HTML, and sync assigned tasks to [Vikunja](https://vikunja.io/).
 
 ## Features
 
-- **View Assigned Issues**: List all issues assigned to you with status of 'Open'.
-- **Issue Details**: Press `Space` to view detailed description and history of an issue.
-- **Log Time**: Press `t` to log time and comments to an issue.
-- **Change Status**: Press `s` to quickly update the status of an issue.
-- **Filter**: Press `f` to filter issues by Project.
-- **Search**: Press `Ctrl+f` to search issue descriptions.
-- **Export**: Press `e` to export current view to an HTML file.
-- **Sync to Planka**: Press `p` to sync your assigned Redmine issues to a Planka board list ("Üzerimdeki İşler").
-- **CLI Sync**: Run with `--sync` to perform a one-time sync without the UI (useful for cron jobs).
+- **Kanban Board** — Issues assigned to you, grouped by status, with priority colors, due-date warnings, and progress bars.
+- **Issue Details** — Press `Space` for full description and comment history.
+- **Log Time** — Press `t` to log hours and comments (with input validation).
+- **Change Status** — Press `s` to move an issue through your workflow.
+- **Filter** — Press `f` to cycle through projects.
+- **Search** — Press `Ctrl+f` to search issue subjects and descriptions.
+- **Open in Browser** — Press `o` to open the selected issue in Redmine.
+- **Export** — Press `e` to export the current board to a styled HTML file.
+- **Sync to Vikunja** — Press `v` to sync your assigned Redmine issues to a Vikunja kanban bucket.
+- **Multi-language** — English (default) and Turkish, selectable via config/env.
+- **CLI Sync** — Run with `--sync` for a headless one-shot sync (great for cron).
 
 ## Installation
 
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd redmine-tui
-   ```
-
-2. Build the binary using Make:
-   ```bash
-   make build
-   ```
-   Or manually:
-   ```bash
-   go build -o redmine-tui .
-   ```
-
-3. Run the application:
-   ```bash
-   make run
-   ```
+```bash
+git clone https://github.com/omertahaoztop/redmine-tui.git
+cd redmine-tui
+make build      # or: go build -o redmine-tui .
+make run        # or: ./redmine-tui
+```
 
 ## Configuration
 
-You can configure the application using environment variables or a configuration file. The application searches for a configuration file in the following order:
+Configuration is loaded (in order) from:
 
 1. `$HOME/.redmine-tui.yaml`
 2. `./.redmine-tui.yaml`
-3. `/etc/default/redmine-tui.yaml` (or `.redmine-tui.yaml`)
+3. `/etc/default/redmine-tui.yaml`
 
-### Environment Variables
+Environment variables override file values. Copy the sample to get started:
 
 ```bash
-# Redmine Configuration
-export REDMINE_API_KEY="your_redmine_api_key"
-export REDMINE_HOST="redmine.example.com"
-
-# Planka Configuration (Optional, for Sync feature)
-export PLANKA_API_URL="https://planka.example.com/api"
-export PLANKA_USERNAME="your_username"
-export PLANKA_PASSWORD="your_password"
+cp .redmine-tui.example.yaml ~/.redmine-tui.yaml
+# then edit it with your own credentials
 ```
 
 ### Config File (`.redmine-tui.yaml`)
@@ -62,52 +45,75 @@ export PLANKA_PASSWORD="your_password"
 ```yaml
 api_key: "your_redmine_api_key"
 host: "redmine.example.com"
+language: "en"           # "en" or "tr"
 
-planka:
-  base_url: "https://planka.example.com/api"
+vikunja:
+  base_url: "https://vikunja.example.com"   # /api/v1 is appended automatically
+  token: "tk_xxxxxxxxxxxxxxxxxxxxxxxx"       # or use username/password below
   username: "your_username"
   password: "your_password"
-  board_id: "1634400507663484080"
-  list_id: "1634400550629934260"
-```
-  list_id: "1634400550629934260"
+  project_id: 5
+  view_id: 20            # optional; auto-detected kanban view if omitted
+  bucket_id: 34          # source bucket for "assigned" tasks
+  done_bucket_id: 39     # optional; closed issues move here instead of being deleted
 ```
 
-### How to Get Planka Board & List IDs
+### Environment Variables
 
-1. **Board ID**: Open your Planka board in a browser. The ID is the number in the URL (e.g., `.../boards/1634400507663484080`).
-2. **List ID**: Open the developer tools (F12) -> Network tab, and refresh. Look for the response containing lists (or `tasks`), or often easier: click on the list menu (if available) or check the API calls when you create a card in that list to see the `listId` payload.
-   - Alternatively, you can inspect the HTML of the list element; the ID typically appears in the DOM attributes (`data-id` or similar).
+```bash
+export REDMINE_API_KEY="your_redmine_api_key"
+export REDMINE_HOST="redmine.example.com"
+export REDMINE_TUI_LANG="en"
+
+export VIKUNJA_API_URL="https://vikunja.example.com"
+export VIKUNJA_TOKEN="tk_xxxxxxxx"
+export VIKUNJA_USERNAME="your_username"
+export VIKUNJA_PASSWORD="your_password"
+export VIKUNJA_PROJECT_ID="5"
+export VIKUNJA_VIEW_ID="20"
+export VIKUNJA_BUCKET_ID="34"
+export VIKUNJA_DONE_BUCKET_ID="39"
+```
+
+### Finding Vikunja Project / Bucket IDs
+
+- **Project ID** — Open the project in Vikunja; it's the number in the URL (`.../projects/5/...`).
+- **View / Bucket IDs** — Open the kanban view, then check the API call `GET /api/v1/projects/{id}/views/{viewId}/tasks` in your browser's network tab. If `view_id` is omitted, the app auto-detects the first kanban view.
 
 ## Key Bindings
 
 | Key | Action |
 | --- | --- |
-| `Space` | View Issue Details |
-| `s` | Change Issue Status |
-| `t` | Log Time to Issue |
-| `f` | Filter by Project |
-| `Ctrl+f`| Search Issues |
+| `←→` / `h l` | Move between columns |
+| `↑↓` / `k j` | Move between cards |
+| `Space` / `Enter` | View issue details |
+| `s` | Change issue status |
+| `t` | Log time to issue |
+| `f` | Cycle project filter |
+| `Ctrl+f` | Search issues |
+| `o` | Open issue in browser |
+| `y` | Copy subject to clipboard |
+| `r` | Refresh |
 | `e` | Export to HTML |
-| `p` | Sync to Planka |
-| `Esc` | Go Back / Clear Input |
+| `v` | Sync to Vikunja |
+| `Esc` | Go back / cancel input |
 | `q` / `Ctrl+c` | Quit |
 
-## Cron Job Example
+## Cron Example
 
-To run the sync automatically every day at 18:00 (6 PM), add the following to your crontab (`crontab -e`):
+Run the sync every day at 18:00:
 
 ```bash
 0 18 * * * /path/to/redmine-tui --sync
 ```
 
-Ensure environment variables are set in the cron environment or loaded from `.redmine-tui.yaml`.
+Make sure credentials are available in the cron environment or via `.redmine-tui.yaml`.
 
 ## Requirements
 
 - Go 1.21+
-- A Redmine instance with API access enabled using an API Key.
-- (Optional) A Planka instance for the sync feature.
+- A Redmine instance with REST API enabled and an API key.
+- (Optional) A Vikunja instance for the sync feature.
 
 ## License
 

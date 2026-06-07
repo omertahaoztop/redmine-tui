@@ -7,9 +7,10 @@ import (
 )
 
 type Config struct {
-	APIKey  string  `mapstructure:"api_key"`
-	Host    string  `mapstructure:"host"`
-	Vikunja Vikunja `mapstructure:"vikunja"`
+	APIKey   string  `mapstructure:"api_key"`
+	Host     string  `mapstructure:"host"`
+	Language string  `mapstructure:"language"`
+	Vikunja  Vikunja `mapstructure:"vikunja"`
 }
 
 type Vikunja struct {
@@ -33,6 +34,7 @@ func LoadConfig() (*Config, error) {
 
 	viper.BindEnv("api_key", "REDMINE_API_KEY")
 	viper.BindEnv("host", "REDMINE_HOST")
+	viper.BindEnv("language", "REDMINE_TUI_LANG")
 	viper.BindEnv("vikunja.base_url", "VIKUNJA_API_URL")
 	viper.BindEnv("vikunja.token", "VIKUNJA_TOKEN")
 	viper.BindEnv("vikunja.username", "VIKUNJA_USERNAME")
@@ -58,6 +60,10 @@ func LoadConfig() (*Config, error) {
 	var config Config
 	if err := viper.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("unable to decode into struct: %w", err)
+	}
+
+	if config.Language == "" {
+		config.Language = viper.GetString("language")
 	}
 
 	if config.Vikunja.BaseURL == "" {

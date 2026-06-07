@@ -1,0 +1,17 @@
+# Redmine TUI — sample configuration.
+# Copy this file to ~/.redmine-tui.yaml and fill in your own values.
+# NEVER commit your real .redmine-tui.yaml — it contains secrets.
+
+api_key: "your_redmine_api_key"
+host: "redmine.example.com"
+language: "en" # "en" or "tr"
+
+vikunja:
+  base_url: "https://vikunja.example.com" # /api/v1 is appended automatically
+  token: "tk_xxxxxxxxxxxxxxxxxxxxxxxx" # or use username/password instead
+  username: "your_username"
+  password: "your_password"
+  project_id: 5
+  view_id: 20 # optional; auto-detected kanban view if omitted
+  bucket_id: 34 # source bucket for assigned tasks
+  done_bucket_id: 39 # optional; closed issues move here instead of being deleted
