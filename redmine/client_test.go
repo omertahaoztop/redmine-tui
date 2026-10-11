@@ -4,8 +4,34 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+// Cloudflare-fronted Redmine instances reject the Go default User-Agent with
+// "error code: 1010" before the API key is checked, so every request must
+// carry a browser-like one.
+func TestRequestsCarryBrowserUserAgent(t *testing.T) {
+	var ua, key string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ua = r.Header.Get("User-Agent")
+		key = r.Header.Get("X-Redmine-API-Key")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(IssuesResponse{})
+	}))
+	defer srv.Close()
+
+	c := NewClient("secret", srv.URL)
+	if _, err := c.GetAssignedIssues(); err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if ua == "" || strings.HasPrefix(ua, "Go-http-client") {
+		t.Fatalf("User-Agent not overridden: %q", ua)
+	}
+	if key != "secret" {
+		t.Fatalf("API key header missing: %q", key)
+	}
+}
 
 // SearchIssues takes user input; it must be URL-encoded so "&" or "#" cannot
 // inject extra filter parameters.

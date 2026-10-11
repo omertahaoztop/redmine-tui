@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -96,6 +97,27 @@ func normalizeHost(host string) string {
 	return "https://" + strings.TrimRight(host, "/")
 }
 
+// userAgent is required. Cloudflare-fronted Redmine instances answer the Go
+// default ("Go-http-client/1.1") with "error code: 1010" — a banned browser
+// signature — before the API key is ever checked.
+const userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+
+// newRequest builds a request with the headers every Redmine call needs.
+func (c *Client) newRequest(method, url string, body []byte) (*http.Request, error) {
+	var r io.Reader
+	if body != nil {
+		r = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, url, r)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Redmine-API-Key", c.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", userAgent)
+	return req, nil
+}
+
 func NewClient(apiKey, host string) *Client {
 	return &Client{
 		APIKey: apiKey,
@@ -108,13 +130,10 @@ func (c *Client) GetAssignedIssues() ([]Issue, error) {
 	// Filtering by assigned_to_id=me, status=open, and increasing limit to 100
 	url := fmt.Sprintf("%s/issues.json?assigned_to_id=me&status_id=open&limit=100", c.Host)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := c.newRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	req.Header.Set("X-Redmine-API-Key", c.APIKey)
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.Client.Do(req)
 	if err != nil {
@@ -137,13 +156,10 @@ func (c *Client) GetAssignedIssues() ([]Issue, error) {
 func (c *Client) GetIssueDetails(id int) (*Issue, error) {
 	url := fmt.Sprintf("%s/issues/%d.json?include=journals", c.Host, id)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := c.newRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	req.Header.Set("X-Redmine-API-Key", c.APIKey)
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.Client.Do(req)
 	if err != nil {
@@ -166,13 +182,10 @@ func (c *Client) GetIssueDetails(id int) (*Issue, error) {
 func (c *Client) GetIssueStatuses() ([]IssueStatus, error) {
 	url := fmt.Sprintf("%s/issue_statuses.json", c.Host)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := c.newRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	req.Header.Set("X-Redmine-API-Key", c.APIKey)
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.Client.Do(req)
 	if err != nil {
@@ -205,13 +218,10 @@ func (c *Client) UpdateIssueStatus(issueID, statusID int) error {
 		return err
 	}
 
-	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(body))
+	req, err := c.newRequest("PUT", url, body)
 	if err != nil {
 		return err
 	}
-
-	req.Header.Set("X-Redmine-API-Key", c.APIKey)
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.Client.Do(req)
 	if err != nil {
@@ -241,13 +251,10 @@ func (c *Client) LogTime(issueID int, hours string, comments string) error {
 		return err
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	req, err := c.newRequest("POST", url, body)
 	if err != nil {
 		return err
 	}
-
-	req.Header.Set("X-Redmine-API-Key", c.APIKey)
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.Client.Do(req)
 	if err != nil {
@@ -277,12 +284,10 @@ func (c *Client) SearchIssues(query string) ([]Issue, error) {
 		q.Set(field, "~"+query)
 		u.RawQuery = q.Encode()
 
-		req, err := http.NewRequest("GET", u.String(), nil)
+		req, err := c.newRequest("GET", u.String(), nil)
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("X-Redmine-API-Key", c.APIKey)
-		req.Header.Set("Content-Type", "application/json")
 		resp, err := c.Client.Do(req)
 		if err != nil {
 			return nil, err

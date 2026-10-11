@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// userAgent is required. Cloudflare-fronted instances answer the Go default
+// ("Go-http-client/1.1") with "error code: 1010" — a banned browser signature
+// — before any authentication is checked.
+const userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
 
 // ── Types ────────────────────────────────────────────────────────────────────────────────
 
@@ -81,12 +87,13 @@ func (c *Client) Login() error {
 		"username": c.Username,
 		"password": c.Password,
 	}
-	body, err := json.Marshal(payload)
+
+	req, err := c.newRequest("POST", url, payload)
 	if err != nil {
 		return err
 	}
 
-	resp, err := c.Client.Post(url, "application/json", bytes.NewBuffer(body))
+	resp, err := c.Client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -112,26 +119,36 @@ func (c *Client) Login() error {
 
 // ── HTTP helper ──────────────────────────────────────────────────────────────────────────
 
-func (c *Client) doRequest(method, url string, payload interface{}) (*http.Response, error) {
-	var req *http.Request
-	var err error
-
+// newRequest builds a request with the headers every Vikunja call needs. The
+// Authorization header is only added once a token exists, so the login call
+// can share this path.
+func (c *Client) newRequest(method, url string, payload interface{}) (*http.Request, error) {
+	var body io.Reader
 	if payload != nil {
-		b, merr := json.Marshal(payload)
-		if merr != nil {
-			return nil, merr
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
 		}
-		req, err = http.NewRequest(method, url, bytes.NewBuffer(b))
-	} else {
-		req, err = http.NewRequest(method, url, nil)
+		body = bytes.NewReader(b)
 	}
+
+	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return nil, err
 	}
-
-	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", userAgent)
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	return req, nil
+}
 
+func (c *Client) doRequest(method, url string, payload interface{}) (*http.Response, error) {
+	req, err := c.newRequest(method, url, payload)
+	if err != nil {
+		return nil, err
+	}
 	return c.Client.Do(req)
 }
 
