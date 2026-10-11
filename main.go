@@ -34,7 +34,11 @@ func main() {
 	}
 
 	m := ui.NewModel(cfg)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	if cfg.Mouse {
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+	p := tea.NewProgram(m, opts...)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)

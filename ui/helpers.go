@@ -2,9 +2,11 @@ package ui
 
 import (
 	"fmt"
-	"redmine-tui/i18n"
+	"regexp"
 	"strings"
 	"time"
+
+	"redmine-tui/i18n"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -22,11 +24,11 @@ const (
 func classifyPriority(name string) priorityKind {
 	n := strings.ToLower(strings.TrimSpace(name))
 	switch {
-	case strings.Contains(n, "kritik") || strings.Contains(n, "acil") || strings.Contains(n, "urgent") || strings.Contains(n, "immediate"):
+	case hasAny(n, "kritik", "acil", "urgent", "immediate"):
 		return prioUrgent
-	case strings.Contains(n, "yüksek") || strings.Contains(n, "high"):
+	case hasAny(n, "yüksek", "high"):
 		return prioHigh
-	case n == "normal" || strings.Contains(n, "orta") || strings.Contains(n, "medium"):
+	case n == "normal" || hasAny(n, "orta", "medium"):
 		return prioNormal
 	default:
 		return prioLow
@@ -43,6 +45,19 @@ func priorityStyle(name string) lipgloss.Style {
 		return stylePriorityNormal
 	default:
 		return stylePriorityLow
+	}
+}
+
+func priorityColor(name string) lipgloss.TerminalColor {
+	switch classifyPriority(name) {
+	case prioUrgent:
+		return colorDanger
+	case prioHigh:
+		return colorWarn
+	case prioNormal:
+		return colorInfo
+	default:
+		return colorMuted
 	}
 }
 
@@ -74,7 +89,9 @@ func trackerIcon(name string) string {
 	}
 }
 
-func dueDateStyle(due string) (string, lipgloss.Style) {
+// humanDue renders a due date as a short human phrase plus its urgency style.
+// It returns an empty label when there is no parsable date.
+func humanDue(due string) (string, lipgloss.Style) {
 	if due == "" {
 		return "", stylePriorityLow
 	}
@@ -87,13 +104,30 @@ func dueDateStyle(due string) (string, lipgloss.Style) {
 	days := int(t.Sub(today).Hours() / 24)
 	switch {
 	case days < 0:
-		return fmt.Sprintf("⚠ %s (%dd)", due, days), styleOverdue
+		return "⚠ " + fmt.Sprintf(i18n.T("due.over"), -days), styleOverdue
 	case days == 0:
-		return "⏰ " + i18n.T("msg.due.today"), styleDueToday
+		return "⏰ " + i18n.T("due.today"), styleDueToday
 	case days <= 3:
-		return fmt.Sprintf("→ %s (%dd)", due, days), styleDueSoon
+		return "→ " + fmt.Sprintf(i18n.T("due.left"), days), styleDueSoon
 	default:
-		return fmt.Sprintf("→ %s", due), stylePriorityLow
+		return "→ " + fmt.Sprintf(i18n.T("due.left"), days), stylePriorityLow
+	}
+}
+
+// relativeTime renders how long ago t happened, in the active language.
+func relativeTime(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return i18n.T("rel.now")
+	case d < time.Hour:
+		return fmt.Sprintf(i18n.T("rel.minutes"), int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf(i18n.T("rel.hours"), int(d.Hours()))
+	case d < 48*time.Hour:
+		return i18n.T("rel.yesterday")
+	default:
+		return fmt.Sprintf(i18n.T("rel.days"), int(d.Hours()/24))
 	}
 }
 
@@ -113,6 +147,58 @@ func progressBar(ratio int, width int) string {
 		color = colorInfo
 	}
 	return lipgloss.NewStyle().Foreground(color).Render(bar)
+}
+
+// ── Markdown-lite ────────────────────────────────────────────────────────────
+
+var (
+	reBold = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	reCode = regexp.MustCompile("`([^`]+)`")
+	reLink = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+)
+
+var (
+	styleMdHeading = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	styleMdBold    = lipgloss.NewStyle().Bold(true).Foreground(colorText)
+	styleMdCode    = lipgloss.NewStyle().Foreground(colorPurple)
+	styleMdLink    = lipgloss.NewStyle().Foreground(colorInfo).Underline(true)
+)
+
+// renderMarkdownLite renders the small subset of markdown that shows up in
+// Redmine descriptions and notes: headings, bullets, bold, inline code, links.
+func renderMarkdownLite(s string) string {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		heading := ""
+		switch {
+		case strings.HasPrefix(trimmed, "### "):
+			heading, trimmed = strings.TrimPrefix(trimmed, "### "), ""
+		case strings.HasPrefix(trimmed, "## "):
+			heading, trimmed = strings.TrimPrefix(trimmed, "## "), ""
+		case strings.HasPrefix(trimmed, "# "):
+			heading, trimmed = strings.TrimPrefix(trimmed, "# "), ""
+		case strings.HasPrefix(trimmed, "- "), strings.HasPrefix(trimmed, "* "):
+			trimmed = "  • " + trimmed[2:]
+		}
+
+		trimmed = reLink.ReplaceAllStringFunc(trimmed, func(m string) string {
+			g := reLink.FindStringSubmatch(m)
+			return styleMdLink.Render(g[1])
+		})
+		trimmed = reCode.ReplaceAllStringFunc(trimmed, func(m string) string {
+			return styleMdCode.Render(reCode.FindStringSubmatch(m)[1])
+		})
+		trimmed = reBold.ReplaceAllStringFunc(trimmed, func(m string) string {
+			return styleMdBold.Render(reBold.FindStringSubmatch(m)[1])
+		})
+
+		if heading != "" {
+			trimmed = styleMdHeading.Render(heading)
+		}
+		lines[i] = trimmed
+	}
+	return strings.Join(lines, "\n")
 }
 
 // truncate shortens s to at most max display cells, appending an ellipsis.

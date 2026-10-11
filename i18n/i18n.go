@@ -45,6 +45,8 @@ var catalog = map[Lang]map[string]string{
 		"hint.status":      "←→: select · enter: apply · esc: back",
 		"hint.time":        "enter: next · esc: back",
 		"hint.search":      "enter: search · esc: cancel",
+		"hint.help":        "?: close · esc: back",
+		"hint.palette":     "enter: run · esc: cancel",
 		"time.step1":       "Step 1/2: Hours",
 		"time.step2":       "Step 2/2: Comments",
 		"time.ph.hours":    "Enter hours (e.g. 1.5)",
@@ -81,6 +83,69 @@ var catalog = map[Lang]map[string]string{
 		"col.nav":            "col %d/%d  ←→ to navigate",
 		"more.up":            "↑ more",
 		"more.down":          "↓ more",
+
+		// Command palette
+		"palette.title":    "Commands",
+		"palette.ph":       "Type a command...",
+		"palette.noresult": "No matching command",
+
+		// Help overlay
+		"help.title":     "Key Bindings",
+		"help.group.nav": "Navigation",
+		"help.group.act": "Issue actions",
+		"help.group.vw":  "Views & tools",
+		"help.group.glo": "Global",
+
+		"key.help":    "help",
+		"key.palette": "palette",
+		"key.sort":    "sort",
+		"key.move":    "move status",
+		"key.top":     "top",
+		"key.bottom":  "bottom",
+		"key.back":    "back",
+
+		// Sorting
+		"sort.priority": "priority",
+		"sort.due":      "due date",
+		"sort.updated":  "updated",
+		"sort.project":  "project",
+		"msg.sort":      "Sort: %s",
+
+		// Relative time
+		"rel.now":       "just now",
+		"rel.minutes":   "%dm ago",
+		"rel.hours":     "%dh ago",
+		"rel.yesterday": "yesterday",
+		"rel.days":      "%dd ago",
+
+		// Due date, human form
+		"due.over":  "%dd overdue",
+		"due.today": "due today",
+		"due.left":  "%dd left",
+
+		// Empty / error recovery
+		"empty.hint": "r refresh · ^f search · f filter · ? help",
+		"err.hint":   "Check your API key and host, then press r to retry · q to quit.",
+
+		// Palette commands
+		"cmd.refresh": "Refresh issues",
+		"cmd.sync":    "Sync to Vikunja",
+		"cmd.export":  "Export board to HTML",
+		"cmd.search":  "Search issues",
+		"cmd.filter":  "Cycle project filter",
+		"cmd.sort":    "Cycle sort order",
+		"cmd.help":    "Show key bindings",
+		"cmd.detail":  "Open issue detail",
+		"cmd.status":  "Change issue status",
+		"cmd.time":    "Log time to issue",
+		"cmd.copy":    "Copy issue subject",
+		"cmd.open":    "Open issue in browser",
+		"cmd.quit":    "Quit",
+
+		"msg.moved":    "Moved to %s",
+		"msg.nomove":   "No previous/next status",
+		"sort.none":    "server order",
+		"time.invalid": "Invalid hours — enter a number (e.g. 1.5)",
 	},
 	TR: {
 		"app.title":    "Redmine Kanban",
@@ -111,6 +176,8 @@ var catalog = map[Lang]map[string]string{
 		"hint.status":      "←→: seç · enter: uygula · esc: geri",
 		"hint.time":        "enter: ileri · esc: geri",
 		"hint.search":      "enter: ara · esc: iptal",
+		"hint.help":        "?: kapat · esc: geri",
+		"hint.palette":     "enter: çalıştır · esc: iptal",
 		"time.step1":       "Adım 1/2: Saat",
 		"time.step2":       "Adım 2/2: Yorum",
 		"time.ph.hours":    "Saat girin (örn. 1.5)",
@@ -145,6 +212,62 @@ var catalog = map[Lang]map[string]string{
 		"col.nav":            "sütun %d/%d  ←→ ile gez",
 		"more.up":            "↑ daha",
 		"more.down":          "↓ daha",
+
+		"palette.title":    "Komutlar",
+		"palette.ph":       "Komut yazın...",
+		"palette.noresult": "Eşleşen komut yok",
+
+		"help.title":     "Tuş Kısayolları",
+		"help.group.nav": "Gezinme",
+		"help.group.act": "İş eylemleri",
+		"help.group.vw":  "Görünüm ve araçlar",
+		"help.group.glo": "Genel",
+
+		"key.help":    "yardım",
+		"key.palette": "komut paleti",
+		"key.sort":    "sırala",
+		"key.move":    "durum taşı",
+		"key.top":     "başa",
+		"key.bottom":  "sona",
+		"key.back":    "geri",
+
+		"sort.priority": "öncelik",
+		"sort.due":      "bitiş tarihi",
+		"sort.updated":  "güncellenme",
+		"sort.project":  "proje",
+		"msg.sort":      "Sıralama: %s",
+
+		"rel.now":       "az önce",
+		"rel.minutes":   "%d dk önce",
+		"rel.hours":     "%d sa önce",
+		"rel.yesterday": "dün",
+		"rel.days":      "%d gün önce",
+
+		"due.over":  "%d gün gecikti",
+		"due.today": "bugün bitiyor",
+		"due.left":  "%d gün kaldı",
+
+		"empty.hint": "r yenile · ^f ara · f filtre · ? yardım",
+		"err.hint":   "API anahtarını ve sunucu adresini kontrol et, sonra r ile yenile · q ile çık.",
+
+		"cmd.refresh": "İşleri yenile",
+		"cmd.sync":    "Vikunja ile eşitle",
+		"cmd.export":  "Panoyu HTML'e aktar",
+		"cmd.search":  "İş ara",
+		"cmd.filter":  "Proje filtresini değiştir",
+		"cmd.sort":    "Sıralamayı değiştir",
+		"cmd.help":    "Tuş kısayollarını göster",
+		"cmd.detail":  "İş detayını aç",
+		"cmd.status":  "İş durumunu değiştir",
+		"cmd.time":    "İşe zaman kaydet",
+		"cmd.copy":    "İş konusunu kopyala",
+		"cmd.open":    "İşi tarayıcıda aç",
+		"cmd.quit":    "Çıkış",
+
+		"msg.moved":    "%s durumuna taşındı",
+		"msg.nomove":   "Önceki/sonraki durum yok",
+		"sort.none":    "sunucu sırası",
+		"time.invalid": "Geçersiz saat — bir sayı girin (örn. 1.5)",
 	},
 }
 

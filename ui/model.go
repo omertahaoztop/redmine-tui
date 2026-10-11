@@ -2,20 +2,15 @@ package ui
 
 import (
 	"fmt"
-	"html"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"redmine-tui/config"
-	"redmine-tui/i18n"
-	"redmine-tui/redmine"
-	"redmine-tui/sync"
-	"redmine-tui/vikunja"
-	"runtime"
+	"sort"
 	"strings"
 	"time"
 
-	"github.com/atotto/clipboard"
+	"redmine-tui/config"
+	"redmine-tui/i18n"
+	"redmine-tui/redmine"
+
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -32,6 +27,8 @@ const (
 	statusView
 	timeInputView
 	searchView
+	helpView
+	paletteView
 )
 
 // ── Messages ────────────────────────────────────────────────────────────────
@@ -44,29 +41,96 @@ type issuesMsg struct {
 // clearStatusMsg is dispatched after a delay to wipe a transient status line.
 type clearStatusMsg struct{ token int }
 
+// statusUpdatedMsg carries the new status name so the toast can say where the
+// issue went instead of a generic confirmation.
+type statusUpdatedMsg struct{ status string }
+
+// ── Sorting ─────────────────────────────────────────────────────────────────
+
+type sortMode int
+
+const (
+	sortServer sortMode = iota
+	sortPriority
+	sortDue
+	sortUpdated
+	sortProject
+)
+
+func (s sortMode) label() string {
+	switch s {
+	case sortPriority:
+		return i18n.T("sort.priority")
+	case sortDue:
+		return i18n.T("sort.due")
+	case sortUpdated:
+		return i18n.T("sort.updated")
+	case sortProject:
+		return i18n.T("sort.project")
+	default:
+		return i18n.T("sort.none")
+	}
+}
+
+func (s sortMode) next() sortMode {
+	if s >= sortProject {
+		return sortServer
+	}
+	return s + 1
+}
+
+// ── Mouse geometry ──────────────────────────────────────────────────────────
+// geom hangs off the model by pointer so the value-receiver View can record
+// hit regions that handleMouse later reads.
+
+type hitCol struct {
+	x, w     int
+	headerY0 int
+	headerY1 int
+}
+
+type hitCard struct {
+	col    int
+	index  int
+	y0, y1 int
+}
+
+type geometry struct {
+	cols  []hitCol
+	cards []hitCard
+}
+
 // ── Model ───────────────────────────────────────────────────────────────────
 
 type Model struct {
 	client     *redmine.Client
 	cfg        *config.Config
 	state      sessionState
+	returnTo   sessionState
 	inputState int
 
 	allIssues []redmine.Issue
 	statuses  []redmine.IssueStatus
 	selected  *redmine.Issue
 	loaded    bool
+	loading   bool
 	err       error
 
-	columns []kanbanColumn
-	colIdx  int
-	cardIdx int
+	columns  []kanbanColumn
+	colIdx   int
+	cardIdx  int
+	followID int
 
 	activeFilter string
+	sortMode     sortMode
 
-	textInput textinput.Model
-	logHours  string
-	viewport  viewport.Model
+	textInput    textinput.Model
+	paletteInput textinput.Model
+	paletteIdx   int
+
+	logHours string
+	viewport viewport.Model
+	spinner  spinner.Model
 
 	windowWidth  int
 	windowHeight int
@@ -74,6 +138,8 @@ type Model struct {
 	statusMsg     string
 	statusIsError bool
 	statusToken   int
+
+	geom *geometry
 }
 
 type kanbanColumn struct {
@@ -84,8 +150,6 @@ type kanbanColumn struct {
 func NewModel(cfg *config.Config) Model {
 	i18n.SetLang(cfg.Language)
 
-	client := redmine.NewClient(cfg.APIKey, cfg.Host)
-
 	ti := textinput.New()
 	ti.Placeholder = i18n.T("time.ph.hours")
 	ti.Focus()
@@ -93,20 +157,33 @@ func NewModel(cfg *config.Config) Model {
 	ti.Width = 40
 	ti.Prompt = lipgloss.NewStyle().Foreground(colorAccent).Render("❯ ")
 
+	pi := textinput.New()
+	pi.Placeholder = i18n.T("palette.ph")
+	pi.CharLimit = 64
+	pi.Width = 44
+	pi.Prompt = lipgloss.NewStyle().Foreground(colorAccent).Render("❯ ")
+
 	vp := viewport.New(0, 0)
 	vp.Style = styleDetailPanel
 
+	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
+	sp.Style = lipgloss.NewStyle().Foreground(colorAccent)
+
 	return Model{
-		client:    client,
-		cfg:       cfg,
-		state:     kanbanView,
-		textInput: ti,
-		viewport:  vp,
+		client:       redmine.NewClient(cfg.APIKey, cfg.Host),
+		cfg:          cfg,
+		state:        kanbanView,
+		loading:      true,
+		textInput:    ti,
+		paletteInput: pi,
+		viewport:     vp,
+		spinner:      sp,
+		geom:         &geometry{},
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.fetchIssues, m.fetchStatuses, textinput.Blink)
+	return tea.Batch(m.fetchIssues, m.fetchStatuses, textinput.Blink, m.spinner.Tick)
 }
 
 // setStatus records a transient status message and returns a cmd that clears it.
@@ -127,255 +204,15 @@ func (m *Model) setStatus(msg string, isErr bool) tea.Cmd {
 // ── Update ──────────────────────────────────────────────────────────────────
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
-			return m, tea.Quit
-		}
-		if msg.String() == "ctrl+f" {
-			m.state = searchView
-			m.inputState = 2
-			m.textInput.Reset()
-			m.textInput.Placeholder = i18n.T("search.ph")
-			m.textInput.Width = 50
-			m.textInput.Focus()
-			return m, textinput.Blink
-		}
+		cmd := m.handleKey(msg)
+		return m, cmd
 
-		switch m.state {
-		case detailView:
-			switch msg.String() {
-			case "esc", "q":
-				m.state = kanbanView
-			case "s":
-				if m.selected != nil {
-					for i, s := range m.statuses {
-						if s.ID == m.selected.Status.ID {
-							m.colIdx = i
-							break
-						}
-					}
-					m.state = statusView
-				}
-			case "t":
-				if m.selected != nil {
-					m.state = timeInputView
-					m.inputState = 0
-					m.textInput.Reset()
-					m.textInput.Placeholder = i18n.T("time.ph.hours")
-					m.textInput.Width = 20
-					m.textInput.Focus()
-					return m, textinput.Blink
-				}
-			case "y":
-				if m.selected != nil {
-					clipboard.WriteAll(m.selected.Subject)
-					return m, m.setStatus(i18n.T("msg.copied"), false)
-				}
-			case "o":
-				if m.selected != nil {
-					openBrowser(fmt.Sprintf("%s/issues/%d", m.client.Host, m.selected.ID))
-					return m, m.setStatus(i18n.T("msg.opening"), false)
-				}
-			default:
-				m.viewport, cmd = m.viewport.Update(msg)
-				return m, cmd
-			}
-			return m, nil
-
-		case statusView:
-			switch msg.String() {
-			case "esc":
-				if m.selected != nil {
-					m.state = detailView
-				} else {
-					m.state = kanbanView
-				}
-				return m, nil
-			case "enter":
-				if len(m.statuses) > 0 && m.colIdx < len(m.statuses) {
-					st := m.statuses[m.colIdx]
-					issueID := 0
-					if m.selected != nil {
-						issueID = m.selected.ID
-					}
-					if issueID != 0 {
-						m.state = kanbanView
-						return m, m.updateStatus(issueID, st.ID)
-					}
-				}
-			case "left", "h":
-				if m.colIdx > 0 {
-					m.colIdx--
-				}
-			case "right", "l":
-				if m.colIdx < len(m.statuses)-1 {
-					m.colIdx++
-				}
-			}
-			return m, nil
-
-		case timeInputView:
-			switch msg.String() {
-			case "esc":
-				m.state = detailView
-				m.textInput.Reset()
-				return m, nil
-			}
-			if msg.Type == tea.KeyEnter {
-				if m.inputState == 0 {
-					hours := strings.TrimSpace(m.textInput.Value())
-					if !validHours(hours) {
-						return m, m.setStatus("Invalid hours — enter a number (e.g. 1.5)", true)
-					}
-					m.logHours = hours
-					m.inputState = 1
-					m.textInput.Reset()
-					m.textInput.Placeholder = i18n.T("time.ph.comments")
-					m.textInput.Width = 50
-					return m, nil
-				}
-				comments := m.textInput.Value()
-				issueID := 0
-				if m.selected != nil {
-					issueID = m.selected.ID
-				}
-				if issueID != 0 {
-					m.state = detailView
-					m.textInput.Reset()
-					return m, m.logTime(issueID, m.logHours, comments)
-				}
-			}
-			m.textInput, cmd = m.textInput.Update(msg)
-			return m, cmd
-
-		case searchView:
-			switch msg.String() {
-			case "esc":
-				m.state = kanbanView
-				m.textInput.Reset()
-				m.rebuildColumns(m.allIssues)
-				return m, nil
-			}
-			if msg.Type == tea.KeyEnter {
-				query := m.textInput.Value()
-				m.state = kanbanView
-				m.textInput.Reset()
-				return m, m.searchIssues(query)
-			}
-			m.textInput, cmd = m.textInput.Update(msg)
-			return m, cmd
-
-		case kanbanView:
-			switch msg.String() {
-			case "q":
-				return m, tea.Quit
-			case "left", "h":
-				if m.colIdx > 0 {
-					m.colIdx--
-					m.cardIdx = 0
-				}
-			case "right", "l":
-				if m.colIdx < len(m.columns)-1 {
-					m.colIdx++
-					m.cardIdx = 0
-				}
-			case "up", "k":
-				if m.cardIdx > 0 {
-					m.cardIdx--
-				}
-			case "down", "j":
-				col := m.currentColumn()
-				if col != nil && m.cardIdx < len(col.issues)-1 {
-					m.cardIdx++
-				}
-			case "enter", " ":
-				issue := m.selectedIssue()
-				if issue != nil {
-					m.selected = issue
-					m.state = detailView
-					m.viewport.SetContent(i18n.T("app.loading"))
-					m.viewport.GotoTop()
-					return m, m.fetchIssueDetails(issue.ID)
-				}
-			case "s":
-				issue := m.selectedIssue()
-				if issue != nil {
-					m.selected = issue
-					for i, s := range m.statuses {
-						if s.ID == issue.Status.ID {
-							m.colIdx = i
-							break
-						}
-					}
-					m.state = statusView
-				}
-			case "t":
-				issue := m.selectedIssue()
-				if issue != nil {
-					m.selected = issue
-					m.state = timeInputView
-					m.inputState = 0
-					m.textInput.Reset()
-					m.textInput.Placeholder = i18n.T("time.ph.hours")
-					m.textInput.Width = 20
-					m.textInput.Focus()
-					return m, textinput.Blink
-				}
-			case "y":
-				issue := m.selectedIssue()
-				if issue != nil {
-					clipboard.WriteAll(issue.Subject)
-					return m, m.setStatus(i18n.T("msg.copied"), false)
-				}
-			case "o":
-				issue := m.selectedIssue()
-				if issue != nil {
-					openBrowser(fmt.Sprintf("%s/issues/%d", m.client.Host, issue.ID))
-					return m, m.setStatus(i18n.T("msg.opening"), false)
-				}
-			case "f":
-				projects := m.uniqueProjects()
-				if len(projects) == 0 {
-					return m, nil
-				}
-				cur := m.activeFilter
-				idx := -1
-				for i, p := range projects {
-					if p == cur {
-						idx = i
-						break
-					}
-				}
-				if idx == -1 || idx >= len(projects)-1 {
-					m.activeFilter = ""
-				} else {
-					m.activeFilter = projects[idx+1]
-				}
-				m.applyFilter()
-				m.colIdx = 0
-				m.cardIdx = 0
-				if m.activeFilter == "" {
-					return m, m.setStatus(i18n.T("msg.filter.all"), false)
-				}
-				return m, m.setStatus(fmt.Sprintf(i18n.T("msg.filter"), m.activeFilter), false)
-			case "r":
-				return m, tea.Batch(m.fetchIssues, m.fetchStatuses)
-			case "e":
-				if err := m.exportToHTML(); err != nil {
-					return m, m.setStatus(fmt.Sprintf("Export error: %v", err), true)
-				}
-				return m, m.setStatus(i18n.T("msg.exported"), false)
-			case "v":
-				return m, tea.Batch(
-					m.setStatus(i18n.T("msg.syncing"), false),
-					m.syncVikunja(),
-				)
-			}
-		}
+	case tea.MouseMsg:
+		cmd := m.handleMouse(msg)
+		return m, cmd
 
 	case tea.WindowSizeMsg:
 		m.windowWidth = msg.Width
@@ -386,15 +223,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case issuesMsg:
 		m.allIssues = msg.issues
 		m.loaded = true
-		if m.activeFilter != "" {
-			m.applyFilter()
-		} else {
-			m.rebuildColumns(msg.issues)
-		}
+		m.loading = false
+		m.applyFilter()
 
 	case []redmine.IssueStatus:
 		m.statuses = msg
-		m.rebuildColumns(m.allIssues)
+		m.rebuildColumns(m.filtered())
 
 	case *redmine.Issue:
 		m.selected = msg
@@ -407,13 +241,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusIsError = false
 		}
 
+	case spinner.TickMsg:
+		if !m.loading {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+
+	case statusUpdatedMsg:
+		text := i18n.T("msg.status_updated")
+		if msg.status != "" {
+			text = fmt.Sprintf(i18n.T("msg.moved"), msg.status)
+		}
+		return m, tea.Batch(m.setStatus(text, false), m.fetchIssues, m.fetchStatuses)
+
 	case string:
 		switch msg {
-		case "status_updated":
-			return m, tea.Batch(
-				m.setStatus(i18n.T("msg.status_updated"), false),
-				m.fetchIssues, m.fetchStatuses,
-			)
 		case "time_logged":
 			return m, m.setStatus(i18n.T("msg.time_logged"), false)
 		case "vikunja_synced":
@@ -423,23 +267,451 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case error:
-		// Non-fatal errors go to status bar; fatal startup errors quit
+		// Non-fatal errors go to the status bar. A startup failure keeps the
+		// error view on screen so the user can fix the config and retry.
+		m.loading = false
 		if !m.loaded {
 			m.err = msg
-			return m, tea.Quit
+			return m, nil
 		}
 		return m, m.setStatus(msg.Error(), true)
 	}
 
-	return m, cmd
+	return m, nil
+}
+
+// openSearch switches to the search overlay and focuses its input.
+func (m *Model) openSearch() tea.Cmd {
+	m.returnTo = m.state
+	m.state = searchView
+	m.inputState = 2
+	m.textInput.Reset()
+	m.textInput.Placeholder = i18n.T("search.ph")
+	m.textInput.Width = 50
+	m.textInput.Focus()
+	return textinput.Blink
+}
+
+// ── Key routing ─────────────────────────────────────────────────────────────
+
+func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
+	k := msg.String()
+
+	if m.err != nil {
+		switch k {
+		case "ctrl+c", "q", "esc":
+			return tea.Quit
+		case "r":
+			m.err = nil
+			m.loading = true
+			return tea.Batch(m.spinner.Tick, m.fetchIssues, m.fetchStatuses)
+		}
+		return nil
+	}
+
+	// Overlays that own their keys.
+	switch m.state {
+	case timeInputView, searchView, paletteView:
+		return m.updateTextInput(msg, k)
+	case statusView:
+		return m.updateStatusPicker(k)
+	}
+
+	if k == "ctrl+c" {
+		return tea.Quit
+	}
+
+	if m.state == helpView {
+		switch k {
+		case "?", "esc", "q", "enter":
+			m.state = kanbanView
+		}
+		return nil
+	}
+
+	switch k {
+	case "ctrl+p", ":":
+		return m.openPalette()
+	case "ctrl+f":
+		return m.openSearch()
+	case "?":
+		m.state = helpView
+		return nil
+	case "esc":
+		m.state = kanbanView
+		return nil
+	}
+
+	// Issue actions are identical on the board and in the detail view.
+	if cmd, handled := m.issueAction(k); handled {
+		return cmd
+	}
+
+	switch m.state {
+	case detailView:
+		return m.updateDetail(msg)
+	default:
+		return m.updateKanban(k)
+	}
+}
+
+// updateStatusPicker drives the status overlay: pick a status, apply it, or go back.
+func (m *Model) updateStatusPicker(k string) tea.Cmd {
+	switch k {
+	case "esc", "q":
+		m.state = m.returnTo
+	case "enter":
+		if len(m.statuses) == 0 || m.colIdx >= len(m.statuses) || m.selected == nil {
+			return nil
+		}
+		// Return to the board so the moved card is visible straight away.
+		st := m.statuses[m.colIdx]
+		m.state = kanbanView
+		m.followID = m.selected.ID
+		return m.updateStatus(m.selected.ID, st.ID, st.Name)
+	case "left", "h":
+		if m.colIdx > 0 {
+			m.colIdx--
+		}
+	case "right", "l":
+		if m.colIdx < len(m.statuses)-1 {
+			m.colIdx++
+		}
+	}
+	return nil
+}
+
+// updateTextInput drives the three views that capture free text.
+func (m *Model) updateTextInput(msg tea.KeyMsg, k string) tea.Cmd {
+	switch m.state {
+
+	case timeInputView:
+		if k == "esc" {
+			m.state = m.returnTo
+			m.textInput.Reset()
+			return nil
+		}
+		if msg.Type == tea.KeyEnter {
+			if m.inputState == 0 {
+				hours := strings.TrimSpace(m.textInput.Value())
+				if !validHours(hours) {
+					return m.setStatus(i18n.T("time.invalid"), true)
+				}
+				m.logHours = hours
+				m.inputState = 1
+				m.textInput.Reset()
+				m.textInput.Placeholder = i18n.T("time.ph.comments")
+				m.textInput.Width = 50
+				return nil
+			}
+			comments := m.textInput.Value()
+			issueID := 0
+			if m.selected != nil {
+				issueID = m.selected.ID
+			}
+			m.state = m.returnTo
+			m.textInput.Reset()
+			if issueID != 0 {
+				return m.logTime(issueID, m.logHours, comments)
+			}
+			return nil
+		}
+
+	case searchView:
+		if k == "esc" {
+			m.state = m.returnTo
+			m.textInput.Reset()
+			return nil
+		}
+		if msg.Type == tea.KeyEnter {
+			query := strings.TrimSpace(m.textInput.Value())
+			m.state = kanbanView
+			m.textInput.Reset()
+			if query == "" {
+				m.applyFilter()
+				return nil
+			}
+			m.loading = true
+			return tea.Batch(m.spinner.Tick, m.searchIssues(query))
+		}
+
+	case paletteView:
+		if k == "esc" {
+			m.state = kanbanView
+			return nil
+		}
+		cmds := m.paletteMatches()
+		switch k {
+		case "up", "ctrl+k":
+			if m.paletteIdx > 0 {
+				m.paletteIdx--
+			}
+			return nil
+		case "down", "ctrl+j":
+			if m.paletteIdx < len(cmds)-1 {
+				m.paletteIdx++
+			}
+			return nil
+		case "enter":
+			if m.paletteIdx >= len(cmds) {
+				m.state = kanbanView
+				return nil
+			}
+			cmd := cmds[m.paletteIdx].run(m)
+			if m.state == paletteView {
+				m.state = kanbanView
+			}
+			return cmd
+		}
+		m.paletteIdx = 0
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	if m.state == paletteView {
+		m.paletteInput, cmd = m.paletteInput.Update(msg)
+	}
+	return cmd
+}
+
+// issueAction runs the keys that act on the focused issue, wherever it is
+// focused. It reports whether the key belonged to this group.
+func (m *Model) issueAction(k string) (tea.Cmd, bool) {
+	switch k {
+	case "s":
+		issue := m.issueTarget()
+		if issue == nil {
+			return nil, true
+		}
+		m.selected = issue
+		m.colIdx = max(0, m.statusIndex(issue.Status.ID))
+		m.returnTo = m.state
+		m.state = statusView
+		return nil, true
+
+	case "t":
+		issue := m.issueTarget()
+		if issue == nil {
+			return nil, true
+		}
+		m.selected = issue
+		m.returnTo = m.state
+		m.state = timeInputView
+		m.inputState = 0
+		m.textInput.Reset()
+		m.textInput.Placeholder = i18n.T("time.ph.hours")
+		m.textInput.Width = 20
+		m.textInput.Focus()
+		return textinput.Blink, true
+
+	case "y":
+		issue := m.issueTarget()
+		if issue == nil {
+			return nil, true
+		}
+		_ = clipboardWrite(issue.Subject)
+		return m.setStatus(i18n.T("msg.copied"), false), true
+
+	case "o":
+		issue := m.issueTarget()
+		if issue == nil {
+			return nil, true
+		}
+		_ = openBrowser(fmt.Sprintf("%s/issues/%d", m.client.Host, issue.ID))
+		return m.setStatus(i18n.T("msg.opening"), false), true
+
+	case "H", "L":
+		issue := m.issueTarget()
+		if issue == nil {
+			return nil, true
+		}
+		idx := m.statusIndex(issue.Status.ID)
+		target := idx - 1
+		if k == "L" {
+			target = idx + 1
+		}
+		if idx < 0 || target < 0 || target >= len(m.statuses) {
+			return m.setStatus(i18n.T("msg.nomove"), true), true
+		}
+		st := m.statuses[target]
+		m.followID = issue.ID
+		return m.updateStatus(issue.ID, st.ID, st.Name), true
+	}
+	return nil, false
+}
+
+func (m *Model) updateDetail(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "q":
+		m.state = kanbanView
+		return nil
+	case "g", "home":
+		m.viewport.GotoTop()
+		return nil
+	case "G", "end":
+		m.viewport.GotoBottom()
+		return nil
+	}
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return cmd
+}
+
+func (m *Model) updateKanban(k string) tea.Cmd {
+	switch k {
+	case "q":
+		return tea.Quit
+
+	case "left", "h":
+		if m.colIdx > 0 {
+			m.colIdx--
+			m.cardIdx = 0
+		}
+	case "right", "l":
+		if m.colIdx < len(m.columns)-1 {
+			m.colIdx++
+			m.cardIdx = 0
+		}
+	case "up", "k":
+		if m.cardIdx > 0 {
+			m.cardIdx--
+		}
+	case "down", "j":
+		if col := m.currentColumn(); col != nil && m.cardIdx < len(col.issues)-1 {
+			m.cardIdx++
+		}
+	case "g", "home":
+		m.cardIdx = 0
+	case "G", "end":
+		if col := m.currentColumn(); col != nil && len(col.issues) > 0 {
+			m.cardIdx = len(col.issues) - 1
+		}
+
+	case "enter", " ":
+		issue := m.selectedIssue()
+		if issue == nil {
+			return nil
+		}
+		m.selected = issue
+		m.state = detailView
+		m.viewport.SetContent(i18n.T("app.loading"))
+		m.viewport.GotoTop()
+		return m.fetchIssueDetails(issue.ID)
+
+	case "f":
+		projects := m.uniqueProjects()
+		if len(projects) == 0 {
+			return nil
+		}
+		idx := -1
+		for i, p := range projects {
+			if p == m.activeFilter {
+				idx = i
+				break
+			}
+		}
+		if idx == -1 || idx >= len(projects)-1 {
+			m.activeFilter = ""
+		} else {
+			m.activeFilter = projects[idx+1]
+		}
+		m.applyFilter()
+		m.colIdx = 0
+		m.cardIdx = 0
+		if m.activeFilter == "" {
+			return m.setStatus(i18n.T("msg.filter.all"), false)
+		}
+		return m.setStatus(fmt.Sprintf(i18n.T("msg.filter"), m.activeFilter), false)
+
+	case "S":
+		m.sortMode = m.sortMode.next()
+		m.applyFilter()
+		m.cardIdx = 0
+		return m.setStatus(fmt.Sprintf(i18n.T("msg.sort"), m.sortMode.label()), false)
+
+	case "r":
+		m.loading = true
+		return tea.Batch(m.spinner.Tick, m.fetchIssues, m.fetchStatuses)
+
+	case "e":
+		if err := m.exportToHTML(); err != nil {
+			return m.setStatus(fmt.Sprintf("Export error: %v", err), true)
+		}
+		return m.setStatus(i18n.T("msg.exported"), false)
+
+	case "v":
+		return tea.Batch(
+			m.setStatus(i18n.T("msg.syncing"), false),
+			m.syncVikunja(),
+		)
+	}
+	return nil
+}
+
+// ── Mouse ───────────────────────────────────────────────────────────────────
+
+func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
+	if m.state != kanbanView || !m.cfg.Mouse || !m.loaded {
+		return nil
+	}
+
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		if m.cardIdx > 0 {
+			m.cardIdx--
+		}
+		return nil
+	case tea.MouseButtonWheelDown:
+		if col := m.currentColumn(); col != nil && m.cardIdx < len(col.issues)-1 {
+			m.cardIdx++
+		}
+		return nil
+	}
+
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
+		return nil
+	}
+
+	for i, c := range m.geom.cols {
+		if msg.X >= c.x && msg.X < c.x+c.w && msg.Y >= c.headerY0 && msg.Y < c.headerY1 {
+			m.colIdx = i
+			m.cardIdx = 0
+			return nil
+		}
+	}
+	for _, c := range m.geom.cards {
+		if msg.Y < c.y0 || msg.Y >= c.y1 || c.col >= len(m.geom.cols) {
+			continue
+		}
+		col := m.geom.cols[c.col]
+		if msg.X < col.x || msg.X >= col.x+col.w {
+			continue
+		}
+		if m.colIdx == c.col && m.cardIdx == c.index {
+			// A second click on the focused card opens it.
+			issue := m.selectedIssue()
+			if issue == nil {
+				return nil
+			}
+			m.selected = issue
+			m.state = detailView
+			m.viewport.SetContent(i18n.T("app.loading"))
+			m.viewport.GotoTop()
+			return m.fetchIssueDetails(issue.ID)
+		}
+		m.colIdx = c.col
+		m.cardIdx = c.index
+		return nil
+	}
+	return nil
 }
 
 // ── Kanban helpers ──────────────────────────────────────────────────────────
 
 func (m *Model) rebuildColumns(issues []redmine.Issue) {
+	var cols []kanbanColumn
 	if len(m.statuses) == 0 {
 		seen := map[int]bool{}
-		cols := []kanbanColumn{}
 		for _, issue := range issues {
 			if !seen[issue.Status.ID] {
 				seen[issue.Status.ID] = true
@@ -448,27 +720,31 @@ func (m *Model) rebuildColumns(issues []redmine.Issue) {
 				})
 			}
 		}
-		for i := range cols {
-			for _, issue := range issues {
-				if issue.Status.ID == cols[i].status.ID {
-					cols[i].issues = append(cols[i].issues, issue)
-				}
-			}
+	} else {
+		cols = make([]kanbanColumn, len(m.statuses))
+		for i, st := range m.statuses {
+			cols[i] = kanbanColumn{status: st}
 		}
-		m.columns = cols
-		return
 	}
 
-	cols := make([]kanbanColumn, len(m.statuses))
-	for i, st := range m.statuses {
-		cols[i] = kanbanColumn{status: st}
-		for _, issue := range issues {
-			if issue.Status.ID == st.ID {
+	for _, issue := range issues {
+		for i := range cols {
+			if cols[i].status.ID == issue.Status.ID {
 				cols[i].issues = append(cols[i].issues, issue)
+				break
 			}
 		}
 	}
-	nonEmpty := []kanbanColumn{}
+
+	if m.sortMode != sortServer {
+		less := m.lessFunc()
+		for i := range cols {
+			issues := cols[i].issues
+			sort.SliceStable(issues, func(a, b int) bool { return less(issues[a], issues[b]) })
+		}
+	}
+
+	nonEmpty := make([]kanbanColumn, 0, len(cols))
 	for _, col := range cols {
 		if len(col.issues) > 0 {
 			nonEmpty = append(nonEmpty, col)
@@ -478,19 +754,64 @@ func (m *Model) rebuildColumns(issues []redmine.Issue) {
 	if m.colIdx >= len(m.columns) {
 		m.colIdx = max(0, len(m.columns)-1)
 	}
+
+	// A card just moved with H/L keeps the cursor: otherwise the next press
+	// would act on whichever card slid into the vacated slot.
+	if m.followID != 0 {
+		for ci := range m.columns {
+			for ii, issue := range m.columns[ci].issues {
+				if issue.ID == m.followID {
+					m.colIdx, m.cardIdx = ci, ii
+				}
+			}
+		}
+		m.followID = 0
+	}
+}
+
+func (m *Model) lessFunc() func(a, b redmine.Issue) bool {
+	switch m.sortMode {
+	case sortPriority:
+		return func(a, b redmine.Issue) bool {
+			return classifyPriority(a.Priority.Name) < classifyPriority(b.Priority.Name)
+		}
+	case sortDue:
+		return func(a, b redmine.Issue) bool {
+			if a.DueDate == "" {
+				return false
+			}
+			if b.DueDate == "" {
+				return true
+			}
+			return a.DueDate < b.DueDate
+		}
+	case sortUpdated:
+		return func(a, b redmine.Issue) bool { return a.UpdatedOn.After(b.UpdatedOn) }
+	default:
+		return func(a, b redmine.Issue) bool {
+			if a.Project.Name != b.Project.Name {
+				return a.Project.Name < b.Project.Name
+			}
+			return a.ID < b.ID
+		}
+	}
+}
+
+func (m Model) filtered() []redmine.Issue {
+	if m.activeFilter == "" {
+		return m.allIssues
+	}
+	out := make([]redmine.Issue, 0, len(m.allIssues))
+	for _, issue := range m.allIssues {
+		if issue.Project.Name == m.activeFilter {
+			out = append(out, issue)
+		}
+	}
+	return out
 }
 
 func (m *Model) applyFilter() {
-	filtered := m.allIssues
-	if m.activeFilter != "" {
-		filtered = []redmine.Issue{}
-		for _, issue := range m.allIssues {
-			if issue.Project.Name == m.activeFilter {
-				filtered = append(filtered, issue)
-			}
-		}
-	}
-	m.rebuildColumns(filtered)
+	m.rebuildColumns(m.filtered())
 }
 
 func (m *Model) uniqueProjects() []string {
@@ -520,6 +841,23 @@ func (m *Model) selectedIssue() *redmine.Issue {
 	return &col.issues[m.cardIdx]
 }
 
+// issueTarget is the issue the shared action keys act on.
+func (m *Model) issueTarget() *redmine.Issue {
+	if m.state == detailView {
+		return m.selected
+	}
+	return m.selectedIssue()
+}
+
+func (m *Model) statusIndex(id int) int {
+	for i, s := range m.statuses {
+		if s.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
 func validHours(s string) bool {
 	if s == "" {
 		return false
@@ -546,10 +884,7 @@ func validHours(s string) bool {
 
 func (m Model) View() string {
 	if m.err != nil {
-		return styleDetailPanel.Render(
-			styleDetailTitle.Render(i18n.T("error")) + "\n\n" +
-				lipgloss.NewStyle().Foreground(colorDanger).Render(m.err.Error()),
-		)
+		return m.viewError()
 	}
 	switch m.state {
 	case detailView:
@@ -560,188 +895,11 @@ func (m Model) View() string {
 		return m.viewTimeInput()
 	case searchView:
 		return m.viewSearch()
+	case helpView:
+		return m.viewHelp()
+	case paletteView:
+		return m.viewPalette()
 	default:
 		return m.viewKanban()
-	}
-}
-
-// ── Commands ────────────────────────────────────────────────────────────────
-
-func (m Model) fetchIssues() tea.Msg {
-	issues, err := m.client.GetAssignedIssues()
-	if err != nil {
-		return err
-	}
-	return issuesMsg{issues: issues, loaded: true}
-}
-
-func (m Model) fetchStatuses() tea.Msg {
-	statuses, err := m.client.GetIssueStatuses()
-	if err != nil {
-		return err
-	}
-	return statuses
-}
-
-func (m Model) fetchIssueDetails(id int) tea.Cmd {
-	return func() tea.Msg {
-		issue, err := m.client.GetIssueDetails(id)
-		if err != nil {
-			return err
-		}
-		return issue
-	}
-}
-
-func (m Model) updateStatus(issueID, statusID int) tea.Cmd {
-	return func() tea.Msg {
-		if err := m.client.UpdateIssueStatus(issueID, statusID); err != nil {
-			return err
-		}
-		return "status_updated"
-	}
-}
-
-func (m Model) logTime(issueID int, hours, comments string) tea.Cmd {
-	return func() tea.Msg {
-		if err := m.client.LogTime(issueID, hours, comments); err != nil {
-			return err
-		}
-		return "time_logged"
-	}
-}
-
-func (m Model) searchIssues(query string) tea.Cmd {
-	return func() tea.Msg {
-		issues, err := m.client.SearchIssues(query)
-		if err != nil {
-			return err
-		}
-		return issuesMsg{issues: issues, loaded: true}
-	}
-}
-
-func (m Model) syncVikunja() tea.Cmd {
-	return func() tea.Msg {
-		vc := vikunja.NewClient(m.cfg.Vikunja.BaseURL, m.cfg.Vikunja.Token, m.cfg.Vikunja.Username, m.cfg.Vikunja.Password)
-		if err := vc.Login(); err != nil {
-			return fmt.Errorf("vikunja login: %w", err)
-		}
-		if err := sync.SyncIssuesToVikunja(m.client, vc, m.cfg); err != nil {
-			return err
-		}
-		return "vikunja_synced"
-	}
-}
-
-// ── Export ──────────────────────────────────────────────────────────────────
-
-func (m Model) exportToHTML() error {
-	f, err := os.Create("redmine_issues.html")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	doc := `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Redmine Issues</title>
-<style>
-:root{--bg:#13131f;--surface:#1c1c2e;--card:#23233a;--border:#2e2e48;--accent:#a29bfe;--text:#e8e8f4;--muted:#6c6c8a}
-*{box-sizing:border-box}
-body{font-family:ui-sans-serif,system-ui,sans-serif;margin:0;padding:32px;background:var(--bg);color:var(--text)}
-h2{color:var(--accent);font-weight:700;letter-spacing:-.02em}
-.board{display:flex;gap:18px;overflow-x:auto;padding-bottom:16px}
-.col{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;min-width:300px;flex-shrink:0}
-.col h3{margin:0 0 14px;font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);display:flex;justify-content:space-between;align-items:center}
-.col h3 span{background:var(--card);color:var(--muted);font-weight:600;padding:2px 8px;border-radius:8px;font-size:12px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;transition:.15s}
-.card:hover{border-color:var(--accent);transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,0,0,.25)}
-.card h4{margin:0 0 8px;font-size:13px;font-weight:600}
-.card h4 .id{color:var(--muted);font-weight:400}
-.tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;color:#fff;background:var(--accent);margin-right:6px;font-weight:600}
-.prio{font-size:12px;font-weight:600}
-.prio-urgent{color:#f87171}.prio-high{color:#fbbf24}.prio-normal{color:#60a5fa}.prio-low{color:#6c6c8a}
-.due{font-size:11px;color:var(--muted);margin-top:6px}
-.due.overdue{color:#f87171;font-weight:600}
-.progress{height:5px;background:var(--border);border-radius:99px;margin-top:8px;overflow:hidden}
-.progress-fill{height:100%;background:var(--accent);border-radius:99px}
-</style>
-</head>
-<body>
-<h2>◈ Redmine Kanban</h2>
-<div class="board">
-`
-
-	cols := map[string][]redmine.Issue{}
-	order := []string{}
-	for _, issue := range m.allIssues {
-		if _, ok := cols[issue.Status.Name]; !ok {
-			order = append(order, issue.Status.Name)
-		}
-		cols[issue.Status.Name] = append(cols[issue.Status.Name], issue)
-	}
-	for _, status := range order {
-		issues := cols[status]
-		doc += fmt.Sprintf(`<div class="col"><h3>%s <span>%d</span></h3>`, html.EscapeString(status), len(issues))
-		for _, issue := range issues {
-			pClass := "prio-low"
-			switch classifyPriority(issue.Priority.Name) {
-			case prioUrgent:
-				pClass = "prio-urgent"
-			case prioHigh:
-				pClass = "prio-high"
-			case prioNormal:
-				pClass = "prio-normal"
-			}
-			due := ""
-			if issue.DueDate != "" {
-				dueClass := "due"
-				t, err := time.Parse("2006-01-02", issue.DueDate)
-				if err == nil && t.Before(time.Now()) {
-					dueClass = "due overdue"
-				}
-				due = fmt.Sprintf(`<div class="%s">Due: %s</div>`, dueClass, html.EscapeString(issue.DueDate))
-			}
-			bar := ""
-			if issue.DoneRatio > 0 {
-				bar = fmt.Sprintf(`<div class="progress"><div class="progress-fill" style="width:%d%%"></div></div>`, issue.DoneRatio)
-			}
-			doc += fmt.Sprintf(`
-<div class="card">
-  <h4><span class="id">#%d</span> %s</h4>
-  <span class="tag">%s</span><span class="prio %s">%s %s</span>
-  %s%s
-</div>`, issue.ID, html.EscapeString(issue.Subject), html.EscapeString(issue.Project.Name), pClass, priorityIcon(issue.Priority.Name), html.EscapeString(issue.Priority.Name), due, bar)
-		}
-		doc += "</div>"
-	}
-
-	doc += `</div></body></html>`
-	if _, err := f.WriteString(doc); err != nil {
-		return err
-	}
-	// Open the absolute path: a bare relative filename is not a URL and
-	// xdg-open/rundll32 resolve it against an unpredictable cwd.
-	abs, err := filepath.Abs("redmine_issues.html")
-	if err != nil {
-		return err
-	}
-	return openBrowser(abs)
-}
-
-func openBrowser(url string) error {
-	switch runtime.GOOS {
-	case "linux":
-		return exec.Command("xdg-open", url).Start()
-	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	case "darwin":
-		return exec.Command("open", url).Start()
-	default:
-		return fmt.Errorf("unsupported platform")
 	}
 }

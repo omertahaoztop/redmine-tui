@@ -8,15 +8,20 @@ A fast, modern Terminal User Interface (TUI) for [Redmine](https://www.redmine.o
 
 ## Features
 
-- **Kanban Board** — Issues assigned to you, grouped by status, with priority colors, due-date warnings, and progress bars.
-- **Issue Details** — Press `Space` for full description and comment history.
+- **Kanban Board** — Issues assigned to you, grouped by status, with priority rails, due-date warnings, and progress bars.
+- **Status Colors** — Each column and card carries the semantic color of its status (new, in progress, feedback, resolved, closed).
+- **Issue Details** — Press `Space` for full description and comment history, with relative timestamps and light markdown rendering.
 - **Log Time** — Press `t` to log hours and comments (with input validation).
-- **Change Status** — Press `s` to move an issue through your workflow.
-- **Filter** — Press `f` to cycle through projects.
-- **Search** — Press `Ctrl+f` to search issue subjects and descriptions.
+- **Change Status** — Press `s` to pick a status, or `H` / `L` to move the issue one status back or forward in a single keypress.
+- **Command Palette** — Press `:` (or `Ctrl+p`) to fuzzy-search every action; each entry shows its shortcut.
+- **Help Overlay** — Press `?` for the full keymap, grouped by task.
+- **Sorting** — Press `S` to cycle priority → due date → updated → project → server order.
+- **Filter & Search** — Press `f` to cycle projects, `Ctrl+f` to search subjects and descriptions.
 - **Open in Browser** — Press `o` to open the selected issue in Redmine.
 - **Export** — Press `e` to export the current board to a styled HTML file.
 - **Sync to Vikunja** — Press `v` to sync your assigned Redmine issues to a Vikunja kanban bucket.
+- **Narrow Terminals** — Below 80 columns the board collapses to one column with a tab strip instead of squeezing every column.
+- **Mouse (opt-in)** — `mouse: true` adds click-to-select, column headers, and wheel scrolling; off by default so terminal text selection keeps working.
 - **Multi-language** — English (default) and Turkish, selectable via config/env.
 - **CLI Sync** — Run with `--sync` for a headless one-shot sync (great for cron).
 
@@ -50,6 +55,7 @@ cp .redmine-tui.example.yaml ~/.redmine-tui.yaml
 api_key: "your_redmine_api_key"
 host: "redmine.example.com"
 language: "en"           # "en" or "tr"
+mouse: false             # true: click to select cards, wheel to scroll
 
 vikunja:
   base_url: "https://vikunja.example.com"   # /api/v1 is appended automatically
@@ -68,6 +74,7 @@ vikunja:
 export REDMINE_API_KEY="your_redmine_api_key"
 export REDMINE_HOST="redmine.example.com"
 export REDMINE_TUI_LANG="en"
+export REDMINE_TUI_MOUSE="false"
 
 export VIKUNJA_API_URL="https://vikunja.example.com"
 export VIKUNJA_TOKEN="tk_xxxxxxxx"
@@ -100,6 +107,11 @@ export VIKUNJA_DONE_BUCKET_ID="39"
 | `r` | Refresh |
 | `e` | Export to HTML |
 | `v` | Sync to Vikunja |
+| `H` / `L` | Move issue to the previous / next status |
+| `S` | Cycle sort order |
+| `g` / `G` | Jump to first / last card |
+| `:` or `Ctrl+p` | Command palette |
+| `?` | Key bindings |
 | `Esc` | Go back / cancel input |
 | `q` / `Ctrl+c` | Quit |
 

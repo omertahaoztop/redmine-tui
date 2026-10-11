@@ -5,6 +5,7 @@
 api_key: "your_redmine_api_key"
 host: "redmine.example.com"
 language: "en" # "en" or "tr"
+mouse: false # true: click to select cards, wheel to scroll (disables terminal text selection)
 
 vikunja:
   base_url: "https://vikunja.example.com" # /api/v1 is appended automatically

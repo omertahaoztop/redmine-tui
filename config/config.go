@@ -11,6 +11,7 @@ type Config struct {
 	APIKey   string  `mapstructure:"api_key"`
 	Host     string  `mapstructure:"host"`
 	Language string  `mapstructure:"language"`
+	Mouse    bool    `mapstructure:"mouse"`
 	Vikunja  Vikunja `mapstructure:"vikunja"`
 }
 
@@ -36,6 +37,7 @@ func LoadConfig() (*Config, error) {
 	viper.BindEnv("api_key", "REDMINE_API_KEY")
 	viper.BindEnv("host", "REDMINE_HOST")
 	viper.BindEnv("language", "REDMINE_TUI_LANG")
+	viper.BindEnv("mouse", "REDMINE_TUI_MOUSE")
 	viper.BindEnv("vikunja.base_url", "VIKUNJA_API_URL")
 	viper.BindEnv("vikunja.token", "VIKUNJA_TOKEN")
 	viper.BindEnv("vikunja.username", "VIKUNJA_USERNAME")
