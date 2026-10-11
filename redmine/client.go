@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -262,11 +263,21 @@ func (c *Client) LogTime(issueID int, hours string, comments string) error {
 }
 
 func (c *Client) SearchIssues(query string) ([]Issue, error) {
-	subjectURL := fmt.Sprintf("%s/issues.json?assigned_to_id=me&status_id=open&limit=100&subject=~%s", c.Host, query)
-	descURL := fmt.Sprintf("%s/issues.json?assigned_to_id=me&status_id=open&limit=100&description=~%s", c.Host, query)
+	// The query is user input, so it must be URL-encoded; building the raw
+	// string would let "&" or "#" inject extra filter parameters.
+	fetch := func(field string) ([]Issue, error) {
+		u, err := url.Parse(c.Host + "/issues.json")
+		if err != nil {
+			return nil, err
+		}
+		q := u.Query()
+		q.Set("assigned_to_id", "me")
+		q.Set("status_id", "open")
+		q.Set("limit", "100")
+		q.Set(field, "~"+query)
+		u.RawQuery = q.Encode()
 
-	fetch := func(url string) ([]Issue, error) {
-		req, err := http.NewRequest("GET", url, nil)
+		req, err := http.NewRequest("GET", u.String(), nil)
 		if err != nil {
 			return nil, err
 		}
@@ -287,11 +298,11 @@ func (c *Client) SearchIssues(query string) ([]Issue, error) {
 		return result.Issues, nil
 	}
 
-	subjectIssues, err := fetch(subjectURL)
+	subjectIssues, err := fetch("subject")
 	if err != nil {
 		return nil, err
 	}
-	descIssues, err := fetch(descURL)
+	descIssues, err := fetch("description")
 	if err != nil {
 		return subjectIssues, nil
 	}

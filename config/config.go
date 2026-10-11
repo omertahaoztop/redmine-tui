@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/viper"
 )
@@ -60,6 +61,15 @@ func LoadConfig() (*Config, error) {
 	var config Config
 	if err := viper.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("unable to decode into struct: %w", err)
+	}
+
+	// The config file carries an API key and possibly Vikunja credentials;
+	// flag it when other users on the host can read it.
+	if path := viper.ConfigFileUsed(); path != "" {
+		if info, err := os.Stat(path); err == nil && info.Mode().Perm()&0o077 != 0 {
+			fmt.Fprintf(os.Stderr, "warning: %s is readable by others (mode %04o) but holds credentials; run: chmod 600 %s\n",
+				path, info.Mode().Perm(), path)
+		}
 	}
 
 	if config.Language == "" {

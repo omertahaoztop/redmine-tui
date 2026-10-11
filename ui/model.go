@@ -2,8 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"html"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"redmine-tui/config"
 	"redmine-tui/i18n"
 	"redmine-tui/redmine"
@@ -641,7 +643,7 @@ func (m Model) exportToHTML() error {
 	}
 	defer f.Close()
 
-	html := `<!DOCTYPE html>
+	doc := `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -684,7 +686,7 @@ h2{color:var(--accent);font-weight:700;letter-spacing:-.02em}
 	}
 	for _, status := range order {
 		issues := cols[status]
-		html += fmt.Sprintf(`<div class="col"><h3>%s <span>%d</span></h3>`, status, len(issues))
+		doc += fmt.Sprintf(`<div class="col"><h3>%s <span>%d</span></h3>`, html.EscapeString(status), len(issues))
 		for _, issue := range issues {
 			pClass := "prio-low"
 			switch classifyPriority(issue.Priority.Name) {
@@ -702,27 +704,33 @@ h2{color:var(--accent);font-weight:700;letter-spacing:-.02em}
 				if err == nil && t.Before(time.Now()) {
 					dueClass = "due overdue"
 				}
-				due = fmt.Sprintf(`<div class="%s">Due: %s</div>`, dueClass, issue.DueDate)
+				due = fmt.Sprintf(`<div class="%s">Due: %s</div>`, dueClass, html.EscapeString(issue.DueDate))
 			}
 			bar := ""
 			if issue.DoneRatio > 0 {
 				bar = fmt.Sprintf(`<div class="progress"><div class="progress-fill" style="width:%d%%"></div></div>`, issue.DoneRatio)
 			}
-			html += fmt.Sprintf(`
+			doc += fmt.Sprintf(`
 <div class="card">
   <h4><span class="id">#%d</span> %s</h4>
   <span class="tag">%s</span><span class="prio %s">%s %s</span>
   %s%s
-</div>`, issue.ID, issue.Subject, issue.Project.Name, pClass, priorityIcon(issue.Priority.Name), issue.Priority.Name, due, bar)
+</div>`, issue.ID, html.EscapeString(issue.Subject), html.EscapeString(issue.Project.Name), pClass, priorityIcon(issue.Priority.Name), html.EscapeString(issue.Priority.Name), due, bar)
 		}
-		html += "</div>"
+		doc += "</div>"
 	}
 
-	html += `</div></body></html>`
-	if _, err := f.WriteString(html); err != nil {
+	doc += `</div></body></html>`
+	if _, err := f.WriteString(doc); err != nil {
 		return err
 	}
-	return openBrowser("redmine_issues.html")
+	// Open the absolute path: a bare relative filename is not a URL and
+	// xdg-open/rundll32 resolve it against an unpredictable cwd.
+	abs, err := filepath.Abs("redmine_issues.html")
+	if err != nil {
+		return err
+	}
+	return openBrowser(abs)
 }
 
 func openBrowser(url string) error {
