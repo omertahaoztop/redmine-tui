@@ -361,34 +361,45 @@ func (m Model) visibleCards(col kanbanColumn, contentW, availH int, active bool)
 // ── Card ────────────────────────────────────────────────────────────────────
 
 func renderCard(issue redmine.Issue, width int, selected bool) string {
-	inner := width - 4
+	// The card style pads one cell on each side, so this is the usable width.
+	inner := width - 2
 	if inner < 8 {
 		inner = 8
 	}
-	body := inner - 2 // one cell for the priority rail plus its space
+	// Every line is prefixed with "<rail> ".
+	const lead = 2
+	room := inner - lead
 
 	rail := lipgloss.NewStyle().Foreground(priorityColor(issue.Priority.Name)).Render("▌")
 
 	idPrefix := fmt.Sprintf("#%d ", issue.ID)
-	title := truncate(issue.Subject, max(4, body-len([]rune(idPrefix))))
+	title := truncate(issue.Subject, max(4, room-len([]rune(idPrefix))))
 	line1 := rail + " " +
 		lipgloss.NewStyle().Foreground(colorMuted).Render(idPrefix) +
 		lipgloss.NewStyle().Bold(selected).Foreground(colorText).Render(title)
 
+	// The project tag carries two padding cells and a space separates it from
+	// the priority; both segments must shrink so the line never wraps.
+	projName := issue.Project.Name
+	prioText := priorityIcon(issue.Priority.Name) + " " + issue.Priority.Name
+	room2 := room - 3
+	if room2 < 6 {
+		room2 = 6
+	}
+	prioText = truncate(prioText, max(3, room2/2))
+	projName = truncate(projName, max(3, room2-lipgloss.Width(prioText)))
+
 	line2 := rail + " " +
-		styleProjectTag.Render(truncate(issue.Project.Name, 12)) + " " +
-		priorityStyle(issue.Priority.Name).Render(priorityIcon(issue.Priority.Name)+" "+issue.Priority.Name)
+		styleProjectTag.Render(projName) + " " +
+		priorityStyle(issue.Priority.Name).Render(prioText)
 
 	lines := []string{line1, line2}
 
 	if label, style := humanDue(issue.DueDate); label != "" {
-		lines = append(lines, rail+" "+style.Render(label))
+		lines = append(lines, rail+" "+style.Render(truncate(label, room)))
 	}
 	if issue.DoneRatio > 0 {
-		barW := body - 7
-		if barW > 28 {
-			barW = 28
-		}
+		barW := min(28, room-6)
 		if barW > 3 {
 			lines = append(lines, rail+fmt.Sprintf(" %3d%% %s", issue.DoneRatio, progressBar(issue.DoneRatio, barW)))
 		}
