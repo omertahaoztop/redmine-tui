@@ -27,11 +27,21 @@ A fast, modern Terminal User Interface (TUI) for [Redmine](https://www.redmine.o
 
 ## Installation
 
+### From source
+
 ```bash
 git clone https://github.com/omertahaoztop/redmine-tui.git
 cd redmine-tui
 make build      # or: go build -o redmine-tui .
 make run        # or: ./redmine-tui
+```
+
+### Archlinux
+
+[![redmine-tui](https://img.shields.io/aur/version/redmine-tui?label=redmine-tui)](https://aur.archlinux.org/packages/redmine-tui/)
+
+```bash
+yay -S redmine-tui
 ```
 
 ## Configuration
