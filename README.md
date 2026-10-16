@@ -39,9 +39,14 @@ make run        # or: ./redmine-tui
 ### Archlinux
 
 [![redmine-tui](https://img.shields.io/aur/version/redmine-tui?label=redmine-tui)](https://aur.archlinux.org/packages/redmine-tui/)
+[![redmine-tui-bin](https://img.shields.io/aur/version/redmine-tui-bin?label=redmine-tui-bin)](https://aur.archlinux.org/packages/redmine-tui-bin/)
 
 ```bash
+# Source release
 yay -S redmine-tui
+
+# Binary release
+yay -S redmine-tui-bin
 ```
 
 ## Configuration
