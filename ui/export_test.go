@@ -1,10 +1,12 @@
 package ui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"redmine-tui/config"
@@ -75,7 +77,8 @@ func TestExportDoesNotFollowSymlink(t *testing.T) {
 	}
 	if err := os.Symlink(victim, filepath.Join(dir, exportFile)); err != nil {
 		// Windows needs a privilege for this; any other failure is a real one.
-		if runtime.GOOS == "windows" && os.IsPermission(err) {
+		const errorPrivilegeNotHeld syscall.Errno = 1314 // Windows ERROR_PRIVILEGE_NOT_HELD
+		if runtime.GOOS == "windows" && (os.IsPermission(err) || errors.Is(err, errorPrivilegeNotHeld)) {
 			t.Skipf("symlinks unavailable: %v", err)
 		}
 		t.Fatal(err)
