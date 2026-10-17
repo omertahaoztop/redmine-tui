@@ -384,7 +384,8 @@ func (c *Client) GetIssueStatuses() ([]IssueStatus, error) {
 
 	statuses := make([]IssueStatus, len(result.IssueStatuses))
 	for i, s := range result.IssueStatuses {
-		s.Name = sanitizeText(s.Name)
+		// Status names render as single-line board headers and picker rows.
+		s.Name = sanitizeLine(s.Name)
 		statuses[i] = s
 	}
 	return statuses, nil
