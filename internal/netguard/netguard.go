@@ -32,10 +32,47 @@ func IsLoopback(host string) bool {
 // would travel in the clear. raw is echoed in the message so the user sees the
 // value they configured. Loopback is exempt: that traffic never leaves the host.
 func RequireSecureTransport(u *url.URL, raw string) error {
-	if u.Scheme != "http" || IsLoopback(u.Hostname()) {
+	switch strings.ToLower(u.Scheme) {
+	case "https":
 		return nil
+	case "http":
+		if IsLoopback(u.Hostname()) {
+			return nil
+		}
+		return fmt.Errorf("refusing to send credentials to plaintext endpoint %q: use https", raw)
+	default:
+		return fmt.Errorf("unsupported endpoint scheme %q: use http or https", u.Scheme)
 	}
-	return fmt.Errorf("refusing to send credentials to plaintext endpoint %q: use https", raw)
+}
+
+// NormalizeEndpoint validates a configured endpoint and returns it with a
+// scheme. A scheme other than http or https is rejected rather than folded into
+// the default: prefixing "https://" to "ftp://host" leaves the credentials
+// addressed to a host named after the scheme.
+func NormalizeEndpoint(raw string) (string, error) {
+	// The scheme is read before the trailing slashes go: trimming "http://"
+	// first would leave "http:" and hide the scheme behind the default.
+	clean := strings.TrimSpace(raw)
+	if i := strings.Index(clean, "://"); i >= 0 {
+		if scheme := strings.ToLower(clean[:i]); scheme != "http" && scheme != "https" {
+			return "", fmt.Errorf("unsupported endpoint scheme %q: use http or https", clean[:i])
+		}
+	} else {
+		clean = "https://" + clean
+	}
+	clean = strings.TrimRight(clean, "/")
+
+	u, err := url.Parse(clean)
+	if err != nil {
+		return "", fmt.Errorf("invalid endpoint %q: %w", raw, err)
+	}
+	if u.Hostname() == "" {
+		return "", fmt.Errorf("endpoint %q has no host", raw)
+	}
+	if err := RequireSecureTransport(u, raw); err != nil {
+		return "", err
+	}
+	return clean, nil
 }
 
 // CheckRedirect keeps credentials on the authority they were configured for: a

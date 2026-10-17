@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"redmine-tui/internal/netguard"
 	"strconv"
 	"strings"
@@ -51,21 +50,12 @@ type Client struct {
 
 // ── Constructor ──────────────────────────────────────────────────────────────────────────
 
-// ensureAPIv1 normalises the base URL to end with /api/v1 and refuses to carry
-// credentials over plaintext HTTP. Every request attaches a bearer token (or the
-// password on login), so a remote http:// endpoint hands them to anyone on the
-// path; loopback is exempt because that traffic never leaves the host.
+// ensureAPIv1 normalises the base URL to end with /api/v1. Every request
+// attaches a bearer token (or the password on login), so netguard refuses a
+// remote plaintext endpoint and an unsupported scheme.
 func ensureAPIv1(rawURL string) (string, error) {
-	clean := strings.TrimRight(strings.TrimSpace(rawURL), "/")
-	if !strings.HasPrefix(clean, "http://") && !strings.HasPrefix(clean, "https://") {
-		clean = "https://" + clean
-	}
-
-	u, err := url.Parse(clean)
+	clean, err := netguard.NormalizeEndpoint(rawURL)
 	if err != nil {
-		return "", fmt.Errorf("invalid vikunja url %q: %w", rawURL, err)
-	}
-	if err := netguard.RequireSecureTransport(u, rawURL); err != nil {
 		return "", err
 	}
 

@@ -17,6 +17,42 @@ func request(t *testing.T, raw string) *http.Request {
 	return &http.Request{URL: u}
 }
 
+// A scheme other than http or https must be rejected, not folded into the
+// default: "https://" + "ftp://host" addresses a host named after the scheme.
+func TestNormalizeEndpoint(t *testing.T) {
+	accepted := map[string]string{
+		"vikunja.example.com":    "https://vikunja.example.com",
+		"https://host.example/":  "https://host.example",
+		"http://127.0.0.1:3456":  "http://127.0.0.1:3456",
+		"localhost:3456":         "https://localhost:3456",
+		"http://localhost:3456/": "http://localhost:3456",
+		"HTTPS://host.example":   "HTTPS://host.example",
+	}
+	for raw, want := range accepted {
+		got, err := NormalizeEndpoint(raw)
+		if err != nil {
+			t.Errorf("NormalizeEndpoint(%q) failed: %v", raw, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("NormalizeEndpoint(%q) = %q, want %q", raw, got, want)
+		}
+	}
+
+	rejected := []string{
+		"ftp://host.example",
+		"file:///etc/passwd",
+		"https:host.example",
+		"http://",
+		"",
+	}
+	for _, raw := range rejected {
+		if got, err := NormalizeEndpoint(raw); err == nil {
+			t.Errorf("NormalizeEndpoint(%q) = %q, want an error", raw, got)
+		}
+	}
+}
+
 func TestRequireSecureTransport(t *testing.T) {
 	allowed := []string{
 		"https://redmine.example.com",
