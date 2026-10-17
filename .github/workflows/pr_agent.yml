@@ -1,0 +1,46 @@
+# Automatic PR review with PR-Agent (MIT, community-owned fork of Qodo's original).
+#
+# Runs on every PR open/update and replies to /review, /describe, /improve and
+# /ask comments. One LLM call per tool, ~30s.
+#
+# The model is this account's own endpoint (api.neuralwatt.com, OpenAI-compatible)
+# so diffs go to a provider we already pay for, not to a review SaaS.
+#
+# `pull_request` (not `pull_request_target`) is deliberate: on a public repo the
+# secrets are then never exposed to fork PRs, so an outside contributor cannot
+# spend the API key by opening a pull request. The trade-off is that fork PRs are
+# not reviewed at all — the job fails fast on the missing key.
+name: PR Agent
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  issue_comment:
+
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr_agent_job:
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: PR Agent
+        uses: the-pr-agent/pr-agent@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Same env names as the local `git-review pragent` wrapper, so one
+          # config shape covers both paths.
+          OPENAI__KEY: ${{ secrets.NEURALWATT_API_KEY }}
+          OPENAI__API_BASE: "https://api.neuralwatt.com/v1"
+          CONFIG__MODEL: "openai/deepseek-v4.1-flash"
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "128000"
+          # Review and describe every new PR; /improve stays on demand.
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "true"
+          github_action_config.auto_improve: "false"
