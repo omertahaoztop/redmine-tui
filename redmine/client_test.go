@@ -206,6 +206,33 @@ func TestGetAssignedIssuesForSyncRequiresCompletePage(t *testing.T) {
 	}
 }
 
+// A server that ignores the offset must not be walked to the page cap: the same
+// page repeats, so there is nothing further to collect.
+func TestGetAssignedIssuesStopsWhenOffsetIsIgnored(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(IssuesResponse{Issues: []Issue{{ID: 1, Subject: "x"}, {ID: 2, Subject: "y"}}})
+	}))
+	defer srv.Close()
+
+	c, err := NewClient("key", srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues, err := c.GetAssignedIssues()
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("got %d issues, want 2", len(issues))
+	}
+	if n := calls.Load(); n > 2 {
+		t.Fatalf("walked %d pages against a server that ignores the offset", n)
+	}
+}
+
 // A response without pagination metadata cannot be told apart from an empty
 // collection, and reading it as "no issues" would delete or move every task
 // reconciliation covers. The fields must be present, not merely zero.
