@@ -78,6 +78,10 @@ jobs:
           # Inline code suggestions carrying an "apply suggestion" button.
           PR_CODE_SUGGESTIONS.COMMITTABLE_CODE_SUGGESTIONS: "true"
           PR_CODE_SUGGESTIONS.NUM_CODE_SUGGESTIONS_PER_CHUNK: "5"
+          # The provider throttles concurrent requests from one key: the /improve
+          # call hung for 15 minutes when it fanned out. Keep it to a single call.
+          PR_CODE_SUGGESTIONS.PARALLEL_CALLS: "false"
+          PR_CODE_SUGGESTIONS.MAX_NUMBER_OF_CALLS: "1"
           # Every push is reviewed, so identical inline comments must not pile up.
           CONFIG__PERSISTENT_INLINE_COMMENTS: "true"
           # Review, describe and improve every new PR.
