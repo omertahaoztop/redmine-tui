@@ -27,6 +27,11 @@ jobs:
     # the default branch WITH repository secrets — so on a public repo any
     # passer-by could spend the API key by commenting. Only the repo owner,
     # members and collaborators may invoke them.
+    #
+    # The sender-type check also skips PRs opened by bots (Dependabot, Renovate).
+    # That is deliberate: dependency bumps were excluded from review before
+    # (`auto_review.ignore_title_keywords` in the old CodeRabbit org config).
+    # Drop the `sender.type` clause if those PRs should be reviewed too.
     if: >-
       github.event.sender.type != 'Bot' &&
       (github.event_name != 'issue_comment' ||
