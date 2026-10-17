@@ -3,8 +3,8 @@
 [![CI](https://github.com/omertahaoztop/redmine-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/omertahaoztop/redmine-tui/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/omertahaoztop/redmine-tui)](https://goreportcard.com/report/github.com/omertahaoztop/redmine-tui)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![redmine-tui](https://img.shields.io/aur/version/redmine-tui?label=redmine-tui)](https://aur.archlinux.org/packages/redmine-tui/)
-[![redmine-tui-bin](https://img.shields.io/aur/version/redmine-tui-bin?label=redmine-tui-bin)](https://aur.archlinux.org/packages/redmine-tui-bin/)
+[![AUR](https://img.shields.io/aur/version/redmine-tui?label=AUR&logo=archlinux&color=1793D1)](https://aur.archlinux.org/packages/redmine-tui/)
+[![AUR (bin)](https://img.shields.io/aur/version/redmine-tui-bin?label=AUR%20(bin)&logo=archlinux&color=1793D1)](https://aur.archlinux.org/packages/redmine-tui-bin/)
 
 A fast, modern Terminal User Interface (TUI) for [Redmine](https://www.redmine.org/), built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea). View assigned issues on a kanban board, log time, change status, filter, search, export to HTML, and sync assigned tasks to [Vikunja](https://vikunja.io/).
 
