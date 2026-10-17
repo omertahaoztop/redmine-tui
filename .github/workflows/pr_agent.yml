@@ -53,3 +53,6 @@ jobs:
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "true"
           github_action_config.auto_improve: "false"
+          # The action skips `synchronize` by default, so a push to an open PR
+          # would go unreviewed; list the events explicitly to review every push.
+          github_action_config.pr_actions: '["opened", "reopened", "synchronize", "ready_for_review"]'
