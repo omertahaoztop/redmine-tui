@@ -76,6 +76,70 @@ func TestCheckRedirectAllowsLoopback(t *testing.T) {
 	}
 }
 
+// The constructor's loopback HTTP exception must not permit redirects to undo
+// HTTPS, including HTTPS reached after starting with an explicit HTTP endpoint.
+func TestCheckRedirectNeverDowngradesHTTPS(t *testing.T) {
+	cases := []struct {
+		name string
+		urls []string
+	}{
+		{"localhost", []string{"https://localhost:3456/start", "http://localhost:3456/target"}},
+		{"IPv4 loopback", []string{"https://127.0.0.1:3456/start", "http://127.0.0.1:3456/target"}},
+		{"IPv6 loopback", []string{"https://[::1]:3456/start", "http://[::1]:3456/target"}},
+		{"default HTTPS port", []string{"https://localhost/start", "http://localhost:443/target"}},
+		{"after upgrade", []string{"http://localhost:443/start", "https://localhost:443/secure", "http://localhost:443/target"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			calls, plaintextRedirects := 0, 0
+			client := &http.Client{
+				CheckRedirect: CheckRedirect,
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					if calls > 0 && req.URL.Scheme == "http" {
+						plaintextRedirects++
+					}
+					calls++
+					resp := &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(strings.NewReader("{}")),
+						Request:    req,
+					}
+					if calls < len(tc.urls) {
+						resp.StatusCode = http.StatusTemporaryRedirect
+						resp.Header.Set("Location", tc.urls[calls])
+					}
+					return resp, nil
+				}),
+			}
+			req, err := http.NewRequest(http.MethodPost, tc.urls[0], strings.NewReader(`{"password":"synthetic"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("X-Redmine-API-Key", "synthetic-key")
+			req.Header.Set("Authorization", "Bearer synthetic-token")
+			resp, err := client.Do(req)
+			if resp != nil {
+				if closeErr := resp.Body.Close(); closeErr != nil {
+					t.Error(closeErr)
+				}
+			}
+			if err == nil || !strings.Contains(err.Error(), "refusing redirect") {
+				t.Errorf("expected downgrade refusal, got %v", err)
+			}
+			if calls != len(tc.urls)-1 || plaintextRedirects != 0 {
+				t.Errorf("transport calls = %d, plaintext redirects = %d; want %d and zero", calls, plaintextRedirects, len(tc.urls)-1)
+			}
+		})
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestCheckRedirectStopsLongChains(t *testing.T) {
 	via := make([]*http.Request, 10)
 	for i := range via {
