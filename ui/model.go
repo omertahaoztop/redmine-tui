@@ -147,7 +147,7 @@ type kanbanColumn struct {
 	issues []redmine.Issue
 }
 
-func NewModel(cfg *config.Config) Model {
+func NewModel(cfg *config.Config) (Model, error) {
 	i18n.SetLang(cfg.Language)
 
 	ti := textinput.New()
@@ -169,8 +169,13 @@ func NewModel(cfg *config.Config) Model {
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
 	sp.Style = lipgloss.NewStyle().Foreground(colorAccent)
 
+	client, err := redmine.NewClient(cfg.APIKey, cfg.Host)
+	if err != nil {
+		return Model{}, err
+	}
+
 	return Model{
-		client:       redmine.NewClient(cfg.APIKey, cfg.Host),
+		client:       client,
 		cfg:          cfg,
 		state:        kanbanView,
 		loading:      true,
@@ -179,7 +184,7 @@ func NewModel(cfg *config.Config) Model {
 		viewport:     vp,
 		spinner:      sp,
 		geom:         &geometry{},
-	}
+	}, nil
 }
 
 func (m Model) Init() tea.Cmd {

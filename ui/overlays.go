@@ -41,7 +41,7 @@ func (m Model) viewError() string {
 	panelW := max(24, min(84, w-12))
 	body := styleDetailPanel.Width(panelW).Render(
 		styleDetailTitle.Render(i18n.T("error")) + "\n\n" +
-			lipgloss.NewStyle().Foreground(colorDanger).Render(m.err.Error()) + "\n\n" +
+			lipgloss.NewStyle().Foreground(colorDanger).Render(singleLine(m.err.Error(), 240)) + "\n\n" +
 			styleHelpDesc.Render(i18n.T("err.hint")),
 	)
 	return lipgloss.Place(w, m.windowHeight, lipgloss.Center, lipgloss.Center, body)

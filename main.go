@@ -33,7 +33,11 @@ func main() {
 		return
 	}
 
-	m := ui.NewModel(cfg)
+	m, err := ui.NewModel(cfg)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
 	opts := []tea.ProgramOption{tea.WithAltScreen()}
 	if cfg.Mouse {
 		opts = append(opts, tea.WithMouseCellMotion())
@@ -49,8 +53,16 @@ func main() {
 func runSync(cfg *config.Config) {
 	fmt.Println("Starting Redmine -> Vikunja Sync...")
 
-	redmineClient := redmine.NewClient(cfg.APIKey, cfg.Host)
-	vikunjaClient := vikunja.NewClient(cfg.Vikunja.BaseURL, cfg.Vikunja.Token, cfg.Vikunja.Username, cfg.Vikunja.Password)
+	redmineClient, err := redmine.NewClient(cfg.APIKey, cfg.Host)
+	if err != nil {
+		fmt.Printf("Error configuring Redmine: %v\n", err)
+		os.Exit(1)
+	}
+	vikunjaClient, err := vikunja.NewClient(cfg.Vikunja.BaseURL, cfg.Vikunja.Token, cfg.Vikunja.Username, cfg.Vikunja.Password)
+	if err != nil {
+		fmt.Printf("Error configuring Vikunja: %v\n", err)
+		os.Exit(1)
+	}
 
 	fmt.Println("Logging into Vikunja...")
 	if err := vikunjaClient.Login(); err != nil {

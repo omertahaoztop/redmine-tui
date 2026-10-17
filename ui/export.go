@@ -14,12 +14,18 @@ import (
 
 // ── Export ──────────────────────────────────────────────────────────────────
 
+// exportFile is the fixed name the board export is published under.
+const exportFile = "redmine_issues.html"
+
 func (m Model) exportToHTML() error {
-	f, err := os.Create("redmine_issues.html")
+	// Write to a private temp file and rename it into place. os.Create would
+	// follow a pre-existing symlink at the destination and truncate whatever it
+	// points at, letting a shared or cloned working directory choose the victim.
+	f, err := os.CreateTemp(".", ".redmine-issues-*.html")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer os.Remove(f.Name())
 
 	doc := `<!DOCTYPE html>
 <html lang="en">
@@ -100,11 +106,18 @@ h2{color:var(--accent);font-weight:700;letter-spacing:-.02em}
 
 	doc += `</div></body></html>`
 	if _, err := f.WriteString(doc); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(f.Name(), exportFile); err != nil {
 		return err
 	}
 	// Open the absolute path: a bare relative filename is not a URL and
 	// xdg-open/rundll32 resolve it against an unpredictable cwd.
-	abs, err := filepath.Abs("redmine_issues.html")
+	abs, err := filepath.Abs(exportFile)
 	if err != nil {
 		return err
 	}

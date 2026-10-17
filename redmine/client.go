@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"redmine-tui/internal/netguard"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -74,12 +76,75 @@ type JournalDetail struct {
 	NewValue string `json:"new_value"`
 }
 
+// IssuesResponse carries the pagination envelope Redmine returns for every
+// collection endpoint, so a caller can tell a complete list from a truncated one.
 type IssuesResponse struct {
-	Issues []Issue `json:"issues"`
+	Issues     []Issue `json:"issues"`
+	TotalCount int     `json:"total_count"`
+	Offset     int     `json:"offset"`
+	Limit      int     `json:"limit"`
 }
 
 type IssueResponse struct {
 	Issue Issue `json:"issue"`
+}
+
+// sanitizeText strips terminal control characters from remote text. Redmine
+// fields are written by other people and end up in the terminal, in the HTML
+// export and in log lines: an ESC in a subject can drive the terminal (OSC 52
+// clipboard writes among others) and a newline in a title forges an extra log
+// record. Newlines survive so multi-line descriptions still render.
+func sanitizeText(s string) string {
+	if strings.IndexFunc(s, isControl) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		// A tab cannot start an escape sequence, so keep it as the word break
+		// it stood for instead of welding the words together.
+		if r == '\t' {
+			return ' '
+		}
+		if isControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func isControl(r rune) bool {
+	switch {
+	case r == '\n':
+		return false
+	case r < 0x20, r == 0x7f:
+		return true
+	case r >= 0x80 && r <= 0x9f: // C1, including the 8-bit CSI 0x9b
+		return true
+	default:
+		return false
+	}
+}
+
+func sanitizeIssue(i Issue) Issue {
+	i.Subject = sanitizeText(i.Subject)
+	i.Description = sanitizeText(i.Description)
+	i.Project.Name = sanitizeText(i.Project.Name)
+	i.Status.Name = sanitizeText(i.Status.Name)
+	i.Priority.Name = sanitizeText(i.Priority.Name)
+	i.Tracker.Name = sanitizeText(i.Tracker.Name)
+	i.Author.Name = sanitizeText(i.Author.Name)
+	i.AssignedTo.Name = sanitizeText(i.AssignedTo.Name)
+	for n := range i.Journals {
+		i.Journals[n].Notes = sanitizeText(i.Journals[n].Notes)
+		i.Journals[n].User.Name = sanitizeText(i.Journals[n].User.Name)
+	}
+	return i
+}
+
+func sanitizeIssues(issues []Issue) []Issue {
+	for i := range issues {
+		issues[i] = sanitizeIssue(issues[i])
+	}
+	return issues
 }
 
 type Client struct {
@@ -88,13 +153,23 @@ type Client struct {
 	Client *http.Client
 }
 
-func normalizeHost(host string) string {
-	// If host already has a scheme, use it as-is (after trimming trailing slash)
-	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
-		return strings.TrimRight(host, "/")
+// normalizeHost validates the configured Redmine host and adds the default
+// scheme. The API key rides on every request, so a remote plaintext endpoint
+// would hand it to anyone on the path; loopback is exempt because that traffic
+// never leaves the host.
+func normalizeHost(host string) (string, error) {
+	clean := strings.TrimRight(strings.TrimSpace(host), "/")
+	if !strings.HasPrefix(clean, "http://") && !strings.HasPrefix(clean, "https://") {
+		clean = "https://" + clean
 	}
-	// No scheme: default to https
-	return "https://" + strings.TrimRight(host, "/")
+	u, err := url.Parse(clean)
+	if err != nil {
+		return "", fmt.Errorf("invalid redmine host %q: %w", host, err)
+	}
+	if err := netguard.RequireSecureTransport(u, host); err != nil {
+		return "", err
+	}
+	return clean, nil
 }
 
 // userAgent is required. Cloudflare-fronted Redmine instances answer the Go
@@ -118,39 +193,101 @@ func (c *Client) newRequest(method, url string, body []byte) (*http.Request, err
 	return req, nil
 }
 
-func NewClient(apiKey, host string) *Client {
+func NewClient(apiKey, host string) (*Client, error) {
+	normalized, err := normalizeHost(host)
+	if err != nil {
+		return nil, err
+	}
 	return &Client{
 		APIKey: apiKey,
-		Host:   normalizeHost(host),
-		Client: &http.Client{Timeout: 10 * time.Second},
-	}
+		Host:   normalized,
+		Client: &http.Client{Timeout: 10 * time.Second, CheckRedirect: netguard.CheckRedirect},
+	}, nil
 }
 
+const (
+	// issuesPageSize is the largest page Redmine serves per request.
+	issuesPageSize = 100
+	// maxIssuesPages bounds the walk. A server that keeps answering with full
+	// pages while reporting no usable total would otherwise loop forever.
+	maxIssuesPages = 200
+)
+
+// GetAssignedIssues returns every open issue assigned to the API key's user.
+// Every page is walked: sync reconciles against this list by absence, so a
+// truncated collection would delete or close live Vikunja tasks.
 func (c *Client) GetAssignedIssues() ([]Issue, error) {
-	// Filtering by assigned_to_id=me, status=open, and increasing limit to 100
-	url := fmt.Sprintf("%s/issues.json?assigned_to_id=me&status_id=open&limit=100", c.Host)
+	var all []Issue
+	seen := make(map[int]struct{})
 
-	req, err := c.newRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
+	// The offset advances by what the server actually returned, not by the page
+	// size we asked for: a server may cap the page below it, and skipping the
+	// gap would hide issues that reconciliation then treats as closed.
+	offset := 0
+	for page := 0; ; page++ {
+		if page == maxIssuesPages {
+			return nil, fmt.Errorf("assigned issues exceed %d pages; refusing a partial collection", maxIssuesPages)
+		}
+
+		u, err := url.Parse(c.Host + "/issues.json")
+		if err != nil {
+			return nil, err
+		}
+		q := u.Query()
+		q.Set("assigned_to_id", "me")
+		q.Set("status_id", "open")
+		q.Set("limit", strconv.Itoa(issuesPageSize))
+		q.Set("offset", strconv.Itoa(offset))
+		// A stable order keeps the walk deterministic. It cannot make the walk
+		// atomic: an issue that closes or is reassigned between two requests
+		// shifts the window, one issue can be missed, and reconciliation reads
+		// that as closed. The next sync recreates the task.
+		q.Set("sort", "id:asc")
+		u.RawQuery = q.Encode()
+
+		req, err := c.newRequest("GET", u.String(), nil)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := c.Client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
+		}
+
+		var result IssuesResponse
+		if err := netguard.DecodeJSON(resp.Body, &result); err != nil {
+			return nil, err
+		}
+
+		// The offset walk can return an issue from an earlier page when the
+		// assigned/open set changes between requests, and sync would then see
+		// the same issue twice.
+		for _, issue := range result.Issues {
+			if _, seen := seen[issue.ID]; seen {
+				continue
+			}
+			seen[issue.ID] = struct{}{}
+			all = append(all, issue)
+		}
+		offset += len(result.Issues)
+
+		// An empty page proves the collection is exhausted; total_count is the
+		// authoritative end when the server reports it.
+		if len(result.Issues) == 0 {
+			break
+		}
+		if result.TotalCount > 0 && offset >= result.TotalCount {
+			break
+		}
 	}
 
-	resp, err := c.Client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
-	}
-
-	var result IssuesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-
-	return result.Issues, nil
+	return sanitizeIssues(all), nil
 }
 
 func (c *Client) GetIssueDetails(id int) (*Issue, error) {
@@ -165,18 +302,18 @@ func (c *Client) GetIssueDetails(id int) (*Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
 	}
 
 	var result IssueResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := netguard.DecodeJSON(resp.Body, &result); err != nil {
 		return nil, err
 	}
 
-	return &result.Issue, nil
+	issue := sanitizeIssue(result.Issue)
+	return &issue, nil
 }
 
 func (c *Client) GetIssueStatuses() ([]IssueStatus, error) {
@@ -191,18 +328,22 @@ func (c *Client) GetIssueStatuses() ([]IssueStatus, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
 	}
 
 	var result IssueStatusesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := netguard.DecodeJSON(resp.Body, &result); err != nil {
 		return nil, err
 	}
 
-	return result.IssueStatuses, nil
+	statuses := make([]IssueStatus, len(result.IssueStatuses))
+	for i, s := range result.IssueStatuses {
+		s.Name = sanitizeText(s.Name)
+		statuses[i] = s
+	}
+	return statuses, nil
 }
 
 func (c *Client) UpdateIssueStatus(issueID, statusID int) error {
@@ -292,15 +433,15 @@ func (c *Client) SearchIssues(query string) ([]Issue, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
 			return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
 		}
 		var result IssuesResponse
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		if err := netguard.DecodeJSON(resp.Body, &result); err != nil {
 			return nil, err
 		}
-		return result.Issues, nil
+		return sanitizeIssues(result.Issues), nil
 	}
 
 	subjectIssues, err := fetch("subject")

@@ -3,6 +3,7 @@ package ui
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -10,8 +11,11 @@ import (
 	"redmine-tui/redmine"
 )
 
-// exportToHTML interpolates issue-controlled text; it must be HTML-escaped.
-func TestExportEscapesHTML(t *testing.T) {
+// exportDir returns a temporary working directory whose browser opener is
+// stubbed out, and makes it the process working directory for the test.
+func exportDir(t *testing.T) string {
+	t.Helper()
+
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "bin")
 	if err := os.Mkdir(bin, 0o755); err != nil {
@@ -22,11 +26,14 @@ func TestExportEscapesHTML(t *testing.T) {
 	}
 	t.Setenv("PATH", bin)
 
-	old, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chdir(old)
+	t.Chdir(dir)
+
+	return dir
+}
+
+// exportToHTML interpolates issue-controlled text; it must be HTML-escaped.
+func TestExportEscapesHTML(t *testing.T) {
+	dir := exportDir(t)
 
 	var iss redmine.Issue
 	iss.ID = 7
@@ -40,7 +47,7 @@ func TestExportEscapesHTML(t *testing.T) {
 		t.Fatalf("export failed: %v", err)
 	}
 
-	b, err := os.ReadFile(filepath.Join(dir, "redmine_issues.html"))
+	b, err := os.ReadFile(filepath.Join(dir, exportFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,5 +61,43 @@ func TestExportEscapesHTML(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected escaped %q in export", want)
 		}
+	}
+}
+
+// os.Create would follow a symlink at the export path and truncate whatever it
+// points at, letting a shared or cloned working directory choose the victim.
+func TestExportDoesNotFollowSymlink(t *testing.T) {
+	dir := exportDir(t)
+
+	victim := filepath.Join(dir, "victim.txt")
+	if err := os.WriteFile(victim, []byte("important"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(dir, exportFile)); err != nil {
+		// Windows needs a privilege for this; any other failure is a real one.
+		if runtime.GOOS == "windows" && os.IsPermission(err) {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+
+	var iss redmine.Issue
+	iss.ID = 1
+	iss.Subject = "subject"
+
+	m := Model{cfg: &config.Config{}, allIssues: []redmine.Issue{iss}}
+	if err := m.exportToHTML(); err != nil {
+		t.Fatalf("export failed: %v", err)
+	}
+
+	if b, err := os.ReadFile(victim); err != nil || string(b) != "important" {
+		t.Fatalf("symlink target was written through: %q (%v)", b, err)
+	}
+	info, err := os.Lstat(filepath.Join(dir, exportFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("export path is still a symlink")
 	}
 }
