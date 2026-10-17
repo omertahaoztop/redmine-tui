@@ -151,7 +151,7 @@ Make sure credentials are available in the cron environment or via `.redmine-tui
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.26+ (the module's own requirement; only needed to build from source)
 - A Redmine instance with REST API enabled and an API key.
 - (Optional) A Vikunja instance for the sync feature.
 
