@@ -16,9 +16,14 @@ on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
   issue_comment:
+    # `created` only: editing or deleting a command comment would otherwise
+    # re-run the job and post the answer twice.
+    types: [created]
 
 concurrency:
-  group: pr-agent-${{ github.event.pull_request.number || github.event.issue.number }}
+  # The event name is part of the key so a push cancelling an in-flight review
+  # does not also cancel a command someone just asked for.
+  group: pr-agent-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
