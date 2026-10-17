@@ -39,7 +39,7 @@ func TestSyncRejectsNonSnapshotCollection(t *testing.T) {
 				if err != nil {
 					t.Error(err)
 				}
-				page := redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 1, Subject: "first"}}, TotalCount: intPtr(3)}
+				page := redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 1, Subject: "first"}}, TotalCount: intPtr(3), Offset: intPtr(0)}
 				if offset > 0 {
 					// Issue 1 is now closed. Offset 1 skips issue 2, which
 					// remains eligible and must keep its existing task.

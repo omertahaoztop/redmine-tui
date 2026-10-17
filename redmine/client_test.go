@@ -170,7 +170,7 @@ func TestGetAssignedIssuesForSyncRequiresCompletePage(t *testing.T) {
 				if r.URL.Query().Get("offset") != "0" || r.URL.Query().Get("assigned_to_id") != "me" || r.URL.Query().Get("status_id") != "open" {
 					t.Errorf("unexpected collection query: %s", r.URL.RawQuery)
 				}
-				var issues []Issue
+				issues := make([]Issue, 0, tc.count)
 				for id := 1; id <= tc.count; id++ {
 					issues = append(issues, Issue{ID: id, Subject: "a\tb"})
 				}

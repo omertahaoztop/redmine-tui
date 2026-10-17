@@ -172,25 +172,6 @@ type Client struct {
 	Client *http.Client
 }
 
-// normalizeHost validates the configured Redmine host and adds the default
-// scheme. The API key rides on every request, so a remote plaintext endpoint
-// would hand it to anyone on the path; loopback is exempt because that traffic
-// never leaves the host.
-func normalizeHost(host string) (string, error) {
-	clean := strings.TrimRight(strings.TrimSpace(host), "/")
-	if !strings.HasPrefix(clean, "http://") && !strings.HasPrefix(clean, "https://") {
-		clean = "https://" + clean
-	}
-	u, err := url.Parse(clean)
-	if err != nil {
-		return "", fmt.Errorf("invalid redmine host %q: %w", host, err)
-	}
-	if err := netguard.RequireSecureTransport(u, host); err != nil {
-		return "", err
-	}
-	return clean, nil
-}
-
 // userAgent is required. Cloudflare-fronted Redmine instances answer the Go
 // default ("Go-http-client/1.1") with "error code: 1010" — a banned browser
 // signature — before the API key is ever checked.
@@ -213,7 +194,9 @@ func (c *Client) newRequest(method, url string, body []byte) (*http.Request, err
 }
 
 func NewClient(apiKey, host string) (*Client, error) {
-	normalized, err := normalizeHost(host)
+	// The API key rides on every request, so netguard refuses a remote plaintext
+	// endpoint and an unsupported scheme.
+	normalized, err := netguard.NormalizeEndpoint(host)
 	if err != nil {
 		return nil, err
 	}
@@ -293,9 +276,11 @@ func (c *Client) getAssignedIssues(singlePage bool) ([]Issue, error) {
 			return nil, err
 		}
 		if singlePage {
-			// Metadata must be present, not merely zero: an empty issues array
-			// without it would otherwise pass as a complete, empty collection.
-			if result.Offset == nil || *result.Offset != 0 ||
+			// Every member must be present, not merely zero: encoding/json
+			// decodes a missing or null member to a nil slice and zero ints, so
+			// an empty array without metadata would otherwise pass as a
+			// complete, empty collection.
+			if result.Issues == nil || result.Offset == nil || *result.Offset != 0 ||
 				result.TotalCount == nil || *result.TotalCount != len(result.Issues) {
 				return nil, fmt.Errorf("assigned issues require a single complete page with pagination metadata for sync; refusing a non-snapshot collection")
 			}
