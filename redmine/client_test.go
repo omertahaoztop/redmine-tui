@@ -15,6 +15,9 @@ import (
 // Cloudflare-fronted Redmine instances reject the Go default User-Agent with
 // "error code: 1010" before the API key is checked, so every request must
 // carry a browser-like one.
+// intPtr builds the pagination envelope's optional fields.
+func intPtr(v int) *int { return &v }
+
 func TestRequestsCarryBrowserUserAgent(t *testing.T) {
 	var ua, key string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +86,7 @@ func TestGetAssignedIssuesWalksEveryPage(t *testing.T) {
 			issues = append(issues, Issue{ID: i, Subject: fmt.Sprintf("issue %d", i)})
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: total, Offset: offset, Limit: pageCap})
+		json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: intPtr(total), Offset: intPtr(offset)})
 	}))
 	defer srv.Close()
 
@@ -114,7 +117,7 @@ func TestGetAssignedIssuesDropsRepeatedPages(t *testing.T) {
 			issues = append(issues, Issue{ID: id, Subject: fmt.Sprintf("issue %d", id)})
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: 5, Offset: offset, Limit: 3})
+		json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: intPtr(5), Offset: intPtr(offset)})
 	}))
 	defer srv.Close()
 
@@ -172,7 +175,7 @@ func TestGetAssignedIssuesForSyncRequiresCompletePage(t *testing.T) {
 					issues = append(issues, Issue{ID: id, Subject: "a\tb"})
 				}
 				w.Header().Set("Content-Type", "application/json")
-				if err := json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: tc.total, Offset: tc.offset}); err != nil {
+				if err := json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: intPtr(tc.total), Offset: intPtr(tc.offset)}); err != nil {
 					t.Error(err)
 				}
 			}))
@@ -203,6 +206,40 @@ func TestGetAssignedIssuesForSyncRequiresCompletePage(t *testing.T) {
 	}
 }
 
+// A response without pagination metadata cannot be told apart from an empty
+// collection, and reading it as "no issues" would delete or move every task
+// reconciliation covers. The fields must be present, not merely zero.
+func TestGetAssignedIssuesForSyncRequiresPaginationMetadata(t *testing.T) {
+	bodies := map[string]string{
+		"no fields":    `{"issues":[]}`,
+		"total only":   `{"issues":[],"total_count":0}`,
+		"offset only":  `{"issues":[],"offset":0}`,
+		"null fields":  `{"issues":[],"total_count":null,"offset":null}`,
+		"issues only":  `{"issues":[{"id":1,"subject":"x"}]}`,
+		"empty object": `{}`,
+	}
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if _, err := w.Write([]byte(body)); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer srv.Close()
+
+			c, err := NewClient("key", srv.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			issues, err := c.GetAssignedIssuesForSync()
+			if err == nil {
+				t.Fatalf("accepted a collection without pagination metadata: %v", issues)
+			}
+		})
+	}
+}
+
 // Issue text is authored by other people and is drawn straight to the terminal:
 // an ESC sequence in a subject can drive it (OSC 52 clipboard writes among
 // others) and a newline in a title forges an extra log record.
@@ -211,7 +248,7 @@ func TestRemoteTextLosesControlCharacters(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("offset") != "0" {
-			json.NewEncoder(w).Encode(IssuesResponse{TotalCount: 1})
+			json.NewEncoder(w).Encode(IssuesResponse{TotalCount: intPtr(1)})
 			return
 		}
 		json.NewEncoder(w).Encode(IssuesResponse{Issues: []Issue{{
@@ -219,7 +256,7 @@ func TestRemoteTextLosesControlCharacters(t *testing.T) {
 			Subject:     osc + "real\nsubject",
 			Description: "line one\r\nline two\ttabbed",
 			Journals:    []Journal{{Notes: osc + "note"}},
-		}}, TotalCount: 1})
+		}}, TotalCount: intPtr(1)})
 	}))
 	defer srv.Close()
 

@@ -90,12 +90,15 @@ type JournalDetail struct {
 }
 
 // IssuesResponse carries the pagination envelope Redmine returns for every
-// collection endpoint, so a caller can tell a complete list from a truncated one.
+// collection endpoint, so a caller can tell a complete list from a truncated
+// one. TotalCount and Offset are pointers because the sync path must tell an
+// absent field from a zero value: a response without them is indistinguishable
+// from an empty collection, and reading it as "no issues" would delete or move
+// every task reconciliation covers.
 type IssuesResponse struct {
 	Issues     []Issue `json:"issues"`
-	TotalCount int     `json:"total_count"`
-	Offset     int     `json:"offset"`
-	Limit      int     `json:"limit"`
+	TotalCount *int    `json:"total_count"`
+	Offset     *int    `json:"offset"`
 }
 
 type IssueResponse struct {
@@ -289,8 +292,13 @@ func (c *Client) getAssignedIssues(singlePage bool) ([]Issue, error) {
 		if err := netguard.DecodeJSON(resp.Body, &result); err != nil {
 			return nil, err
 		}
-		if singlePage && (result.Offset != 0 || result.TotalCount != len(result.Issues)) {
-			return nil, fmt.Errorf("assigned issues require a single complete page for sync; refusing a non-snapshot collection")
+		if singlePage {
+			// Metadata must be present, not merely zero: an empty issues array
+			// without it would otherwise pass as a complete, empty collection.
+			if result.Offset == nil || *result.Offset != 0 ||
+				result.TotalCount == nil || *result.TotalCount != len(result.Issues) {
+				return nil, fmt.Errorf("assigned issues require a single complete page with pagination metadata for sync; refusing a non-snapshot collection")
+			}
 		}
 
 		// The offset walk can return an issue from an earlier page when the
@@ -309,7 +317,7 @@ func (c *Client) getAssignedIssues(singlePage bool) ([]Issue, error) {
 		if len(result.Issues) == 0 {
 			break
 		}
-		if result.TotalCount > 0 && offset >= result.TotalCount {
+		if result.TotalCount != nil && *result.TotalCount > 0 && offset >= *result.TotalCount {
 			break
 		}
 	}
