@@ -23,6 +23,10 @@ type IssueStatusesResponse struct {
 }
 
 type Issue struct {
+	// Preserve the source title for reconciliation, which historically matches
+	// Vikunja tasks by the exact Redmine subject rather than its display text.
+	originalSubject string
+
 	ID          int       `json:"id"`
 	Subject     string    `json:"subject"`
 	Description string    `json:"description"`
@@ -56,6 +60,15 @@ type Issue struct {
 		Name string `json:"name"`
 	} `json:"assigned_to"`
 	Journals []Journal `json:"journals"`
+}
+
+// OriginalSubject returns the unmodified subject used to match Vikunja tasks.
+// It may contain terminal controls and must be quoted when included in errors.
+func (i Issue) OriginalSubject() string {
+	if i.originalSubject != "" {
+		return i.originalSubject
+	}
+	return i.Subject
 }
 
 type Journal struct {
@@ -125,6 +138,9 @@ func isControl(r rune) bool {
 }
 
 func sanitizeIssue(i Issue) Issue {
+	if i.originalSubject == "" {
+		i.originalSubject = i.Subject
+	}
 	i.Subject = sanitizeText(i.Subject)
 	i.Description = sanitizeText(i.Description)
 	i.Project.Name = sanitizeText(i.Project.Name)
