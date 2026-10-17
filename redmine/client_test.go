@@ -282,7 +282,15 @@ func TestRemoteTextLosesControlCharacters(t *testing.T) {
 			ID:          1,
 			Subject:     osc + "real\nsubject",
 			Description: "line one\r\nline two\ttabbed",
-			Journals:    []Journal{{Notes: osc + "note"}},
+			Journals: []Journal{{
+				Notes: osc + "note",
+				Details: []JournalDetail{{
+					Property: "attr",
+					Name:     "description",
+					OldValue: osc + "bopen",
+					NewValue: "first\nsecond",
+				}},
+			}},
 		}}, TotalCount: intPtr(1)})
 	}))
 	defer srv.Close()
@@ -310,14 +318,25 @@ func TestRemoteTextLosesControlCharacters(t *testing.T) {
 			t.Fatalf("%s kept a control character: %q", name, s)
 		}
 	}
-	if !strings.HasSuffix(got.Subject, "real\nsubject") {
-		t.Errorf("subject = %q, want the visible text preserved", got.Subject)
+	// A subject renders on one line, so its newline becomes a space; a
+	// description keeps newlines so multi-line text still renders.
+	if want := "]52;c;cGF3bmVkreal subject"; got.Subject != want {
+		t.Errorf("subject = %q, want %q", got.Subject, want)
 	}
 	if want := "line one\nline two tabbed"; got.Description != want {
 		t.Errorf("description = %q, want %q", got.Description, want)
 	}
 	if want := "]52;c;cGF3bmVknote"; got.Journals[0].Notes != want {
 		t.Errorf("notes = %q, want %q", got.Journals[0].Notes, want)
+	}
+	// Journal details are not rendered today; the decode boundary still strips
+	// them so a later renderer cannot reintroduce the vector.
+	detail := got.Journals[0].Details[0]
+	if want := "]52;c;cGF3bmVkbopen"; detail.OldValue != want {
+		t.Errorf("detail old_value = %q, want %q", detail.OldValue, want)
+	}
+	if strings.IndexFunc(detail.NewValue, func(r rune) bool { return r != '\n' && (r < 0x20 || r == 0x7f) }) >= 0 {
+		t.Errorf("detail new_value kept a control character: %q", detail.NewValue)
 	}
 }
 
