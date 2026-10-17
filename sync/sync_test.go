@@ -39,11 +39,11 @@ func TestSyncRejectsNonSnapshotCollection(t *testing.T) {
 				if err != nil {
 					t.Error(err)
 				}
-				page := redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 1, Subject: "first"}}, TotalCount: intPtr(3), Offset: intPtr(0)}
+				page := redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 1, Subject: "first"}}, TotalCount: new(3), Offset: new(0)}
 				if offset > 0 {
 					// Issue 1 is now closed. Offset 1 skips issue 2, which
 					// remains eligible and must keep its existing task.
-					page = redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 3, Subject: "last"}}, TotalCount: intPtr(2), Offset: intPtr(offset)}
+					page = redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 3, Subject: "last"}}, TotalCount: new(2), Offset: new(offset)}
 				}
 				if err := json.NewEncoder(w).Encode(page); err != nil {
 					t.Error(err)
@@ -73,9 +73,6 @@ func TestSyncRejectsNonSnapshotCollection(t *testing.T) {
 	}
 }
 
-// intPtr builds the pagination envelope's optional fields.
-func intPtr(v int) *int { return &v }
-
 // Existing tasks keep their identity even when two subjects have the same
 // sanitized display text. Missing tasks must also retain the original title.
 func TestSyncPreservesOriginalSubjects(t *testing.T) {
@@ -99,7 +96,7 @@ func TestSyncPreservesOriginalSubjects(t *testing.T) {
 					w.Header().Set("Content-Type", "application/json")
 					switch {
 					case r.Method == http.MethodGet && r.URL.Path == "/issues.json":
-						if err := json.NewEncoder(w).Encode(redmine.IssuesResponse{Issues: issues, TotalCount: intPtr(len(issues)), Offset: intPtr(0)}); err != nil {
+						if err := json.NewEncoder(w).Encode(redmine.IssuesResponse{Issues: issues, TotalCount: new(len(issues)), Offset: new(0)}); err != nil {
 							t.Error(err)
 						}
 					case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/1/views/2/tasks":
@@ -192,7 +189,7 @@ func TestSyncEscapesSubjectInErrors(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/issues.json":
-			if err := json.NewEncoder(w).Encode(redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 1, Subject: subject}}, TotalCount: intPtr(1), Offset: intPtr(0)}); err != nil {
+			if err := json.NewEncoder(w).Encode(redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 1, Subject: subject}}, TotalCount: new(1), Offset: new(0)}); err != nil {
 				t.Error(err)
 			}
 		case "/api/v1/projects/1/views/2/tasks":

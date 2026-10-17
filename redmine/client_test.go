@@ -15,9 +15,6 @@ import (
 // Cloudflare-fronted Redmine instances reject the Go default User-Agent with
 // "error code: 1010" before the API key is checked, so every request must
 // carry a browser-like one.
-// intPtr builds the pagination envelope's optional fields.
-func intPtr(v int) *int { return &v }
-
 func TestRequestsCarryBrowserUserAgent(t *testing.T) {
 	var ua, key string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +83,7 @@ func TestGetAssignedIssuesWalksEveryPage(t *testing.T) {
 			issues = append(issues, Issue{ID: i, Subject: fmt.Sprintf("issue %d", i)})
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: intPtr(total), Offset: intPtr(offset)})
+		json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: new(total), Offset: new(offset)})
 	}))
 	defer srv.Close()
 
@@ -117,7 +114,7 @@ func TestGetAssignedIssuesDropsRepeatedPages(t *testing.T) {
 			issues = append(issues, Issue{ID: id, Subject: fmt.Sprintf("issue %d", id)})
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: intPtr(5), Offset: intPtr(offset)})
+		json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: new(5), Offset: new(offset)})
 	}))
 	defer srv.Close()
 
@@ -175,7 +172,7 @@ func TestGetAssignedIssuesForSyncRequiresCompletePage(t *testing.T) {
 					issues = append(issues, Issue{ID: id, Subject: "a\tb"})
 				}
 				w.Header().Set("Content-Type", "application/json")
-				if err := json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: intPtr(tc.total), Offset: intPtr(tc.offset)}); err != nil {
+				if err := json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: new(tc.total), Offset: new(tc.offset)}); err != nil {
 					t.Error(err)
 				}
 			}))
@@ -275,7 +272,7 @@ func TestRemoteTextLosesControlCharacters(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("offset") != "0" {
-			json.NewEncoder(w).Encode(IssuesResponse{TotalCount: intPtr(1)})
+			json.NewEncoder(w).Encode(IssuesResponse{TotalCount: new(1)})
 			return
 		}
 		json.NewEncoder(w).Encode(IssuesResponse{Issues: []Issue{{
@@ -291,7 +288,7 @@ func TestRemoteTextLosesControlCharacters(t *testing.T) {
 					NewValue: "first\nsecond",
 				}},
 			}},
-		}}, TotalCount: intPtr(1)})
+		}}, TotalCount: new(1)})
 	}))
 	defer srv.Close()
 
