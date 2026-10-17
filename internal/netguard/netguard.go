@@ -41,11 +41,14 @@ func RequireSecureTransport(u *url.URL, raw string) error {
 // CheckRedirect keeps credentials on the authority they were configured for: a
 // redirect to another host or port would hand them to a third party (Go only
 // strips the Authorization header, and only across hosts) and one that
-// downgrades to http would expose them on the wire. via[0] is the original
-// request.
+// downgrades to http would expose them on the wire. HTTPS downgrades are rejected
+// even on loopback. via[0] is the original request.
 func CheckRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return fmt.Errorf("stopped after 10 redirects")
+	}
+	if via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return fmt.Errorf("refusing redirect from https to %s: credentials require encrypted transport", req.URL.Scheme)
 	}
 	origin := via[0].URL
 	if !strings.EqualFold(req.URL.Hostname(), origin.Hostname()) || port(req.URL) != port(origin) {
