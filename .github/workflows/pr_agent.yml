@@ -54,10 +54,22 @@ jobs:
           OPENAI__API_BASE: "https://api.neuralwatt.com/v1"
           CONFIG__MODEL: "openai/deepseek-v4.1-flash"
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: "128000"
-          # Review and describe every new PR; /improve stays on demand.
+          # Line-anchored findings: each review finding is also posted as an inline
+          # comment on the changed line (off by default), and the default cap of
+          # three findings is raised.
+          PR_REVIEWER.INLINE_KEY_ISSUES: "true"
+          PR_REVIEWER.NUM_MAX_FINDINGS: "12"
+          PR_REVIEWER.REQUIRE_RISK_ASSESSMENT: "true"
+          PR_REVIEWER.REQUIRE_MERGE_RECOMMENDATION: "true"
+          # Inline code suggestions carrying an "apply suggestion" button.
+          PR_CODE_SUGGESTIONS.COMMITTABLE_CODE_SUGGESTIONS: "true"
+          PR_CODE_SUGGESTIONS.NUM_CODE_SUGGESTIONS_PER_CHUNK: "5"
+          # Every push is reviewed, so identical inline comments must not pile up.
+          CONFIG__PERSISTENT_INLINE_COMMENTS: "true"
+          # Review, describe and improve every new PR.
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "true"
-          github_action_config.auto_improve: "false"
+          github_action_config.auto_improve: "true"
           # The action skips `synchronize` by default, so a push to an open PR
           # would go unreviewed; list the events explicitly to review every push.
           github_action_config.pr_actions: '["opened", "reopened", "synchronize", "ready_for_review"]'
