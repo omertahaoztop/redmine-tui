@@ -23,7 +23,14 @@ concurrency:
 
 jobs:
   pr_agent_job:
-    if: ${{ github.event.sender.type != 'Bot' }}
+    # Commands (/review, /ask, …) come in as issue_comment events, which run from
+    # the default branch WITH repository secrets — so on a public repo any
+    # passer-by could spend the API key by commenting. Only the repo owner,
+    # members and collaborators may invoke them.
+    if: >-
+      github.event.sender.type != 'Bot' &&
+      (github.event_name != 'issue_comment' ||
+       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,7 +38,9 @@ jobs:
       pull-requests: write
     steps:
       - name: PR Agent
-        uses: the-pr-agent/pr-agent@main
+        # Pinned to the v0.48.0 commit: @main is mutable, and this job holds a
+        # token with write access plus the API key.
+        uses: the-pr-agent/pr-agent@981344be2755e303df501e18e3f60b848a188a80
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Same env names as the local `git-review pragent` wrapper, so one
