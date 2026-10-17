@@ -303,20 +303,24 @@ func (c *Client) getAssignedIssues(singlePage bool) ([]Issue, error) {
 
 		// The offset walk can return an issue from an earlier page when the
 		// assigned/open set changes between requests; display it only once.
+		added := 0
 		for _, issue := range result.Issues {
 			if _, seen := seen[issue.ID]; seen {
 				continue
 			}
 			seen[issue.ID] = struct{}{}
 			all = append(all, issue)
+			added++
 		}
 		offset += len(result.Issues)
 
-		// An empty page proves the collection is exhausted; total_count is the
-		// authoritative end when the server reports it.
-		if len(result.Issues) == 0 {
+		// An empty page ends the collection, and so does a page of nothing but
+		// repeats: the server is not honouring the offset, and walking on would
+		// only ask for the same page again.
+		if added == 0 {
 			break
 		}
+		// total_count is the authoritative end when the server reports it.
 		if result.TotalCount != nil && *result.TotalCount > 0 && offset >= *result.TotalCount {
 			break
 		}
