@@ -229,16 +229,26 @@ const (
 	maxIssuesPages = 200
 )
 
-// GetAssignedIssues returns every open issue assigned to the API key's user.
-// Every page is walked: sync reconciles against this list by absence, so a
-// truncated collection would delete or close live Vikunja tasks.
+// GetAssignedIssues walks every page of open issues for display. The result can
+// change between requests and must not be used for absence-based reconciliation.
 func (c *Client) GetAssignedIssues() ([]Issue, error) {
+	return c.getAssignedIssues(false)
+}
+
+// GetAssignedIssuesForSync requires the complete collection in one response.
+// Without snapshot pagination, combining pages could omit a live issue whose
+// task would then be deleted or moved by reconciliation.
+func (c *Client) GetAssignedIssuesForSync() ([]Issue, error) {
+	return c.getAssignedIssues(true)
+}
+
+func (c *Client) getAssignedIssues(singlePage bool) ([]Issue, error) {
 	var all []Issue
 	seen := make(map[int]struct{})
 
 	// The offset advances by what the server actually returned, not by the page
 	// size we asked for: a server may cap the page below it, and skipping the
-	// gap would hide issues that reconciliation then treats as closed.
+	// gap would hide issues from the board.
 	offset := 0
 	for page := 0; ; page++ {
 		if page == maxIssuesPages {
@@ -255,9 +265,8 @@ func (c *Client) GetAssignedIssues() ([]Issue, error) {
 		q.Set("limit", strconv.Itoa(issuesPageSize))
 		q.Set("offset", strconv.Itoa(offset))
 		// A stable order keeps the walk deterministic. It cannot make the walk
-		// atomic: an issue that closes or is reassigned between two requests
-		// shifts the window, one issue can be missed, and reconciliation reads
-		// that as closed. The next sync recreates the task.
+		// atomic: a status or assignment change between requests may shift the
+		// window and omit an issue. Sync therefore requires a single page.
 		q.Set("sort", "id:asc")
 		u.RawQuery = q.Encode()
 
@@ -280,10 +289,12 @@ func (c *Client) GetAssignedIssues() ([]Issue, error) {
 		if err := netguard.DecodeJSON(resp.Body, &result); err != nil {
 			return nil, err
 		}
+		if singlePage && (result.Offset != 0 || result.TotalCount != len(result.Issues)) {
+			return nil, fmt.Errorf("assigned issues require a single complete page for sync; refusing a non-snapshot collection")
+		}
 
 		// The offset walk can return an issue from an earlier page when the
-		// assigned/open set changes between requests, and sync would then see
-		// the same issue twice.
+		// assigned/open set changes between requests; display it only once.
 		for _, issue := range result.Issues {
 			if _, seen := seen[issue.ID]; seen {
 				continue

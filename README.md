@@ -25,6 +25,12 @@ A fast, modern Terminal User Interface (TUI) for [Redmine](https://www.redmine.o
 - **Multi-language** — English (default) and Turkish, selectable via config/env.
 - **CLI Sync** — Run with `--sync` for a headless one-shot sync (great for cron).
 
+Sync requires all assigned open issues to fit in one Redmine response (up to 100,
+or the server's lower page limit). If the response is incomplete or its count
+cannot be verified, sync stops before changing Vikunja tasks. The board can
+still load multiple pages. This prevents task removal caused by issues shifting
+between pages during a sync.
+
 ## Installation
 
 ### From source
