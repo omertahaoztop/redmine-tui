@@ -59,6 +59,11 @@ jobs:
           OPENAI__API_BASE: "https://api.neuralwatt.com/v1"
           CONFIG__MODEL: "openai/deepseek-v4.1-flash"
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: "128000"
+          # max_model_tokens defaults to 32k, which silently drops files from the
+          # review ("not included because of the token budget"). The endpoint
+          # serves 128k, so raise the cap and chunk anything larger.
+          CONFIG__MAX_MODEL_TOKENS: "120000"
+          PR_REVIEWER.ENABLE_LARGE_PR_CHUNKING: "true"
           # Line-anchored findings: each review finding is also posted as an inline
           # comment on the changed line (off by default), and the default cap of
           # three findings is raised.
