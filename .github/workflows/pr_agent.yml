@@ -75,19 +75,20 @@ jobs:
           PR_REVIEWER.NUM_MAX_FINDINGS: "12"
           PR_REVIEWER.REQUIRE_RISK_ASSESSMENT: "true"
           PR_REVIEWER.REQUIRE_MERGE_RECOMMENDATION: "true"
-          # Inline code suggestions carrying an "apply suggestion" button.
-          PR_CODE_SUGGESTIONS.COMMITTABLE_CODE_SUGGESTIONS: "true"
-          PR_CODE_SUGGESTIONS.NUM_CODE_SUGGESTIONS_PER_CHUNK: "5"
-          # The provider throttles concurrent requests from one key: the /improve
-          # call hung for 15 minutes when it fanned out. Keep it to a single call.
-          PR_CODE_SUGGESTIONS.PARALLEL_CALLS: "false"
-          PR_CODE_SUGGESTIONS.MAX_NUMBER_OF_CALLS: "1"
           # Every push is reviewed, so identical inline comments must not pile up.
           CONFIG__PERSISTENT_INLINE_COMMENTS: "true"
-          # Review, describe and improve every new PR.
+          # A failure must not fall back to the shipped default model, which this
+          # endpoint does not serve ("Model 'gpt-5.6-terra' not found").
+          CONFIG__FALLBACK_MODELS: '["openai/deepseek-v4.1-flash"]'
+          # Review and describe every new PR.
+          #
+          # auto_improve stays off: the code-suggestion call does not work on this
+          # model — with an output cap it returns empty content
+          # ("finish_reason: length"), without one it generates for over 13
+          # minutes. `/improve` is still available as a command.
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "true"
-          github_action_config.auto_improve: "true"
+          github_action_config.auto_improve: "false"
           # The action skips `synchronize` by default, so a push to an open PR
           # would go unreviewed; list the events explicitly to review every push.
           github_action_config.pr_actions: '["opened", "reopened", "synchronize", "ready_for_review"]'
