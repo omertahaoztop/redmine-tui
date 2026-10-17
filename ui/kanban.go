@@ -99,7 +99,9 @@ func (m Model) statusLine() string {
 	if m.statusIsError {
 		glyph, color = "✗", colorDanger
 	}
-	return lipgloss.NewStyle().Foreground(color).PaddingLeft(2).Render(glyph + " " + m.statusMsg)
+	// The message can carry a remote error body; keep the toast on one bounded
+	// line so a multi-line body cannot pad the whole frame.
+	return lipgloss.NewStyle().Foreground(color).PaddingLeft(2).Render(glyph + " " + singleLine(m.statusMsg, 160))
 }
 
 func (m Model) renderFooter(w int) string {

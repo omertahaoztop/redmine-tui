@@ -217,6 +217,14 @@ func truncate(s string, max int) string {
 	return string(r[:max-1]) + "…"
 }
 
+// singleLine flattens s to one bounded line. Remote error text reaches the
+// status bar and the error panel, and lipgloss pads every line of a multi-line
+// block to its longest line — so an unbounded body breaks the layout and costs
+// quadratic allocation while it does.
+func singleLine(s string, limit int) string {
+	return truncate(strings.Join(strings.Fields(s), " "), limit)
+}
+
 func max(a, b int) int {
 	if a > b {
 		return a

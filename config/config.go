@@ -27,12 +27,19 @@ type Vikunja struct {
 }
 
 func LoadConfig() (*Config, error) {
+	// $HOME and /etc/default are trusted, the working directory is not: a config
+	// file dropped next to the binary (a cloned repo, a shared temp dir) can name
+	// the host that receives credentials inherited from the environment. A config
+	// outside these paths therefore has to be selected explicitly.
 	viper.AddConfigPath("$HOME")
-	viper.AddConfigPath(".")
 	viper.AddConfigPath("/etc/default")
 
 	viper.SetConfigName(".redmine-tui")
 	viper.SetConfigType("yaml")
+
+	if path := os.Getenv("REDMINE_TUI_CONFIG"); path != "" {
+		viper.SetConfigFile(path)
+	}
 
 	viper.BindEnv("api_key", "REDMINE_API_KEY")
 	viper.BindEnv("host", "REDMINE_HOST")

@@ -72,7 +72,10 @@ func (m Model) searchIssues(query string) tea.Cmd {
 
 func (m Model) syncVikunja() tea.Cmd {
 	return func() tea.Msg {
-		vc := vikunja.NewClient(m.cfg.Vikunja.BaseURL, m.cfg.Vikunja.Token, m.cfg.Vikunja.Username, m.cfg.Vikunja.Password)
+		vc, err := vikunja.NewClient(m.cfg.Vikunja.BaseURL, m.cfg.Vikunja.Token, m.cfg.Vikunja.Username, m.cfg.Vikunja.Password)
+		if err != nil {
+			return err
+		}
 		if err := vc.Login(); err != nil {
 			return fmt.Errorf("vikunja login: %w", err)
 		}

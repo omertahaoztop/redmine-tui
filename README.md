@@ -54,8 +54,9 @@ yay -S redmine-tui-bin
 Configuration is loaded (in order) from:
 
 1. `$HOME/.redmine-tui.yaml`
-2. `./.redmine-tui.yaml`
-3. `/etc/default/redmine-tui.yaml`
+2. `/etc/default/redmine-tui.yaml`
+
+The working directory is deliberately not searched: a config file dropped next to the binary (a cloned repo, a shared temp dir) could point `host` or `vikunja.base_url` at a host you did not choose while your credentials come from the environment. Set `REDMINE_TUI_CONFIG` to an explicit path to load a config from anywhere else.
 
 Environment variables override file values. Copy the sample to get started:
 
@@ -84,6 +85,8 @@ vikunja:
 ```
 
 ### Environment Variables
+
+`host` and `vikunja.base_url` must use `https://` unless they address the local machine: the Redmine API key and the Vikunja token or password are attached to every request, so a remote plaintext endpoint is refused. `REDMINE_TUI_CONFIG` selects a config file outside `$HOME` and `/etc/default`.
 
 ```bash
 export REDMINE_API_KEY="your_redmine_api_key"

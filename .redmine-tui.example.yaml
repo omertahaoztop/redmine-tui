@@ -1,6 +1,8 @@
 # Redmine TUI — sample configuration.
 # Copy this file to ~/.redmine-tui.yaml and fill in your own values.
 # NEVER commit your real .redmine-tui.yaml — it contains secrets.
+# `host` and `vikunja.base_url` must be https:// unless they point at the local
+# machine: credentials are attached to every request.
 
 api_key: "your_redmine_api_key"
 host: "redmine.example.com"
