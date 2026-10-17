@@ -8,7 +8,7 @@ import (
 )
 
 func SyncIssuesToVikunja(redmineClient *redmine.Client, vikunjaClient *vikunja.Client, cfg *config.Config) error {
-	issues, err := redmineClient.GetAssignedIssues()
+	issues, err := redmineClient.GetAssignedIssuesForSync()
 	if err != nil {
 		return fmt.Errorf("failed to fetch redmine issues: %w", err)
 	}

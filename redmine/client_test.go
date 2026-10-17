@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -65,10 +66,8 @@ func TestSearchIssuesEncodesQuery(t *testing.T) {
 	}
 }
 
-// GetAssignedIssues feeds reconciliation in sync, which treats an issue missing
-// from the list as closed and deletes its Vikunja task — so every page must come
-// back, not just the first one. The server here caps the page size below the
-// limit the client asks for, which must not look like the end of the collection.
+// The board must load every page, even when the server caps its page size below
+// the limit the client asks for.
 func TestGetAssignedIssuesWalksEveryPage(t *testing.T) {
 	const (
 		total   = 150
@@ -105,7 +104,7 @@ func TestGetAssignedIssuesWalksEveryPage(t *testing.T) {
 }
 
 // The offset walk can hand back an issue from an earlier page when the
-// assigned/open set changes between requests; sync must not see it twice.
+// assigned/open set changes between requests; the board must not show it twice.
 func TestGetAssignedIssuesDropsRepeatedPages(t *testing.T) {
 	pages := [][]int{{1, 2, 3}, {3, 4, 5}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,6 +135,71 @@ func TestGetAssignedIssuesDropsRepeatedPages(t *testing.T) {
 	}
 	if len(got) != 5 {
 		t.Fatalf("got %d issues, want 5", len(got))
+	}
+}
+
+func TestGetAssignedIssuesForSyncRequiresCompletePage(t *testing.T) {
+	cases := []struct {
+		name                 string
+		count, total, offset int
+		ok                   bool
+	}{
+		{"empty", 0, 0, 0, true},
+		{"single issue", 1, 1, 0, true},
+		{"full page", issuesPageSize, issuesPageSize, 0, true},
+		{"second page needed", issuesPageSize, issuesPageSize + 1, 0, false},
+		{"server caps page", 1, 2, 0, false},
+		{"unknown total", 1, 0, 0, false},
+		{"empty but incomplete", 0, 1, 0, false},
+		{"negative total", 0, -1, 0, false},
+		{"underreported total", 2, 1, 0, false},
+		{"wrong offset", 1, 1, 1, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if calls.Add(1) != 1 {
+					t.Error("requested another page")
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				if r.URL.Query().Get("offset") != "0" || r.URL.Query().Get("assigned_to_id") != "me" || r.URL.Query().Get("status_id") != "open" {
+					t.Errorf("unexpected collection query: %s", r.URL.RawQuery)
+				}
+				var issues []Issue
+				for id := 1; id <= tc.count; id++ {
+					issues = append(issues, Issue{ID: id, Subject: "a\tb"})
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(IssuesResponse{Issues: issues, TotalCount: tc.total, Offset: tc.offset}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer srv.Close()
+			c, err := NewClient("key", srv.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			issues, err := c.GetAssignedIssuesForSync()
+			if (err == nil) != tc.ok {
+				t.Fatalf("GetAssignedIssuesForSync() error = %v, want success=%t", err, tc.ok)
+			}
+			if !tc.ok && issues != nil {
+				t.Fatalf("returned partial collection: %v", issues)
+			}
+			if tc.ok && len(issues) != tc.count {
+				t.Fatalf("got %d issues, want %d", len(issues), tc.count)
+			}
+			for _, issue := range issues {
+				if issue.Subject != "a b" || issue.OriginalSubject() != "a\tb" {
+					t.Fatal("display sanitization or original subject was lost")
+				}
+			}
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("requested %d pages, want one", got)
+			}
+		})
 	}
 }
 
