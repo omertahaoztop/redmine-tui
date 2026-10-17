@@ -169,9 +169,10 @@ func TestDecodeJSONClosesAndDrains(t *testing.T) {
 	}
 }
 
-// A response larger than the budget must not be decoded in full.
+// A response larger than the budget must not be decoded in full. The payload is
+// valid JSON so that the size limit is the only thing that can fail the decode.
 func TestDecodeJSONBoundsTheBody(t *testing.T) {
-	body := &trackedBody{Reader: strings.NewReader(strings.Repeat("x", MaxResponseBytes+1))}
+	body := &trackedBody{Reader: strings.NewReader(`"` + strings.Repeat("x", MaxResponseBytes) + `"`)}
 	var v interface{}
 	if err := DecodeJSON(body, &v); err == nil {
 		t.Fatal("an oversized body was decoded")
