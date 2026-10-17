@@ -28,10 +28,13 @@ concurrency:
 
 jobs:
   pr_agent_job:
+    # A hung model call can leave the job running for tens of minutes; the normal
+    # run is ~3 minutes, so cap it and let GitHub kill a stuck one.
+    timeout-minutes: 15
     # Commands (/review, /ask, …) come in as issue_comment events, which run from
     # the default branch WITH repository secrets — so on a public repo any
     # passer-by could spend the API key by commenting. Only the repo owner,
-    # members and collaborators may invoke them.
+    # members and collaborators may invoke them, and only on a pull request.
     #
     # The sender-type check also skips PRs opened by bots (Dependabot, Renovate).
     # That is deliberate: dependency bumps were excluded from review before
@@ -40,7 +43,8 @@ jobs:
     if: >-
       github.event.sender.type != 'Bot' &&
       (github.event_name != 'issue_comment' ||
-       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+       (github.event.issue.pull_request != null &&
+        contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
     runs-on: ubuntu-latest
     permissions:
       contents: read
