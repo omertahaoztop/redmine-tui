@@ -382,3 +382,28 @@ func TestNewClientRejectsPlaintextRemoteHost(t *testing.T) {
 		t.Fatalf("host = %q, want %q", c.Host, want)
 	}
 }
+
+// Status names render as single-line board headers, so a newline in one must not
+// survive: the flash-model review missed this while every other name field was
+// already flattened.
+func TestIssueStatusNamesAreFlattened(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(IssueStatusesResponse{IssueStatuses: []IssueStatus{
+			{ID: 1, Name: "In\nProgress\x1b]52;c;x\x07"},
+		}})
+	}))
+	defer srv.Close()
+
+	c, err := NewClient("key", srv.URL)
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	statuses, err := c.GetIssueStatuses()
+	if err != nil {
+		t.Fatalf("GetIssueStatuses failed: %v", err)
+	}
+	if want := "In Progress]52;c;x"; statuses[0].Name != want {
+		t.Fatalf("status name = %q, want %q", statuses[0].Name, want)
+	}
+}
