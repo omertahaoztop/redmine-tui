@@ -61,7 +61,10 @@ jobs:
           # config shape covers both paths.
           OPENAI__KEY: ${{ secrets.NEURALWATT_API_KEY }}
           OPENAI__API_BASE: "https://api.neuralwatt.com/v1"
-          CONFIG__MODEL: "openai/deepseek-v4.1-flash"
+          # The review quality is the model: on the same diff the flash model
+          # missed a real sanitization inconsistency that nw-large, kimi-k3,
+          # glm-5.3 and Kodus all caught. kimi-k3 is the fastest of those.
+          CONFIG__MODEL: "openai/kimi-k3"
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: "128000"
           # max_model_tokens defaults to 32k, which silently drops files from the
           # review ("not included because of the token budget"). The endpoint
@@ -79,7 +82,7 @@ jobs:
           CONFIG__PERSISTENT_INLINE_COMMENTS: "true"
           # A failure must not fall back to the shipped default model, which this
           # endpoint does not serve ("Model 'gpt-5.6-terra' not found").
-          CONFIG__FALLBACK_MODELS: '["openai/deepseek-v4.1-flash"]'
+          CONFIG__FALLBACK_MODELS: '["openai/kimi-k3"]'
           # Review and describe every new PR.
           #
           # auto_improve stays off: the code-suggestion call does not work on this
