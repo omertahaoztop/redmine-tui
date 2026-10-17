@@ -140,21 +140,41 @@ func isControl(r rune) bool {
 	}
 }
 
+// sanitizeLine is sanitizeText for fields that render on a single line. A
+// newline in a subject or a name breaks the board layout and forges an extra
+// log record, so it becomes a space here.
+func sanitizeLine(s string) string {
+	if strings.IndexByte(s, '\n') < 0 {
+		return sanitizeText(s)
+	}
+	return sanitizeText(strings.ReplaceAll(s, "\n", " "))
+}
+
 func sanitizeIssue(i Issue) Issue {
 	if i.originalSubject == "" {
 		i.originalSubject = i.Subject
 	}
-	i.Subject = sanitizeText(i.Subject)
+	i.Subject = sanitizeLine(i.Subject)
 	i.Description = sanitizeText(i.Description)
-	i.Project.Name = sanitizeText(i.Project.Name)
-	i.Status.Name = sanitizeText(i.Status.Name)
-	i.Priority.Name = sanitizeText(i.Priority.Name)
-	i.Tracker.Name = sanitizeText(i.Tracker.Name)
-	i.Author.Name = sanitizeText(i.Author.Name)
-	i.AssignedTo.Name = sanitizeText(i.AssignedTo.Name)
+	i.Project.Name = sanitizeLine(i.Project.Name)
+	i.Status.Name = sanitizeLine(i.Status.Name)
+	i.Priority.Name = sanitizeLine(i.Priority.Name)
+	i.Tracker.Name = sanitizeLine(i.Tracker.Name)
+	i.Author.Name = sanitizeLine(i.Author.Name)
+	i.AssignedTo.Name = sanitizeLine(i.AssignedTo.Name)
 	for n := range i.Journals {
 		i.Journals[n].Notes = sanitizeText(i.Journals[n].Notes)
-		i.Journals[n].User.Name = sanitizeText(i.Journals[n].User.Name)
+		i.Journals[n].User.Name = sanitizeLine(i.Journals[n].User.Name)
+		// The detail fields are not rendered today, but they carry the same
+		// user-authored text as the notes: sanitize at the decode boundary so a
+		// later renderer cannot reintroduce the vector.
+		for d := range i.Journals[n].Details {
+			detail := &i.Journals[n].Details[d]
+			detail.Property = sanitizeLine(detail.Property)
+			detail.Name = sanitizeLine(detail.Name)
+			detail.OldValue = sanitizeText(detail.OldValue)
+			detail.NewValue = sanitizeText(detail.NewValue)
+		}
 	}
 	return i
 }
