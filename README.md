@@ -25,6 +25,12 @@ A fast, modern Terminal User Interface (TUI) for [Redmine](https://www.redmine.o
 - **Multi-language** — English (default) and Turkish, selectable via config/env.
 - **CLI Sync** — Run with `--sync` for a headless one-shot sync (great for cron).
 
+Sync requires all assigned open issues to fit in one Redmine response (up to 100,
+or the server's lower page limit). If the response is incomplete or its count
+cannot be verified, sync stops before changing Vikunja tasks. The board can
+still load multiple pages. This prevents task removal caused by issues shifting
+between pages during a sync.
+
 ## Installation
 
 ### From source
@@ -54,8 +60,9 @@ yay -S redmine-tui-bin
 Configuration is loaded (in order) from:
 
 1. `$HOME/.redmine-tui.yaml`
-2. `./.redmine-tui.yaml`
-3. `/etc/default/redmine-tui.yaml`
+2. `/etc/default/redmine-tui.yaml`
+
+The working directory is deliberately not searched: a config file dropped next to the binary (a cloned repo, a shared temp dir) could point `host` or `vikunja.base_url` at a host you did not choose while your credentials come from the environment. Set `REDMINE_TUI_CONFIG` to an explicit path to load a config from anywhere else.
 
 Environment variables override file values. Copy the sample to get started:
 
@@ -84,6 +91,8 @@ vikunja:
 ```
 
 ### Environment Variables
+
+`host` and `vikunja.base_url` must use `https://` unless they address the local machine: the Redmine API key and the Vikunja token or password are attached to every request, so a remote plaintext endpoint is refused. `REDMINE_TUI_CONFIG` selects a config file outside `$HOME` and `/etc/default`.
 
 ```bash
 export REDMINE_API_KEY="your_redmine_api_key"
@@ -142,7 +151,7 @@ Make sure credentials are available in the cron environment or via `.redmine-tui
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.26+ (the module's own requirement; only needed to build from source)
 - A Redmine instance with REST API enabled and an API key.
 - (Optional) A Vikunja instance for the sync feature.
 

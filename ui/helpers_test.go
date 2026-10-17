@@ -1,6 +1,9 @@
 package ui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTruncateRuneSafe(t *testing.T) {
 	cases := []struct {
@@ -53,5 +56,17 @@ func TestValidHours(t *testing.T) {
 		if validHours(s) {
 			t.Errorf("validHours(%q) = true, want false", s)
 		}
+	}
+}
+
+// Remote error text reaches the status bar and the error panel; lipgloss pads
+// every line of a multi-line block to its longest line, so it must be flattened
+// and bounded first.
+func TestSingleLineFlattensAndBounds(t *testing.T) {
+	if got, want := singleLine("first\nsecond\tthird", 100), "first second third"; got != want {
+		t.Errorf("singleLine = %q, want %q", got, want)
+	}
+	if got, want := singleLine(strings.Repeat("x", 50), 10), "xxxxxxxxx…"; got != want {
+		t.Errorf("singleLine = %q, want %q", got, want)
 	}
 }

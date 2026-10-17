@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"redmine-tui/internal/netguard"
 	"strconv"
 	"strings"
 	"time"
@@ -49,29 +50,58 @@ type Client struct {
 
 // ── Constructor ──────────────────────────────────────────────────────────────────────────
 
-// ensureAPIv1 normalises the base URL to end with /api/v1.
-func ensureAPIv1(url string) string {
-	clean := strings.TrimRight(url, "/")
-	if !strings.HasPrefix(clean, "http://") && !strings.HasPrefix(clean, "https://") {
-		clean = "https://" + clean
+// ensureAPIv1 normalises the base URL to end with /api/v1. Every request
+// attaches a bearer token (or the password on login), so netguard refuses a
+// remote plaintext endpoint and an unsupported scheme.
+func ensureAPIv1(rawURL string) (string, error) {
+	clean, err := netguard.NormalizeEndpoint(rawURL)
+	if err != nil {
+		return "", err
 	}
+
 	if strings.HasSuffix(clean, "/api/v1") {
-		return clean
+		return clean, nil
 	}
 	if strings.HasSuffix(clean, "/api") {
-		return clean + "/v1"
+		return clean + "/v1", nil
 	}
-	return clean + "/api/v1"
+	return clean + "/api/v1", nil
 }
 
-func NewClient(baseURL, token, username, password string) *Client {
+func NewClient(baseURL, token, username, password string) (*Client, error) {
+	normalized, err := ensureAPIv1(baseURL)
+	if err != nil {
+		return nil, err
+	}
 	return &Client{
-		BaseURL:  ensureAPIv1(baseURL),
+		BaseURL:  normalized,
 		Token:    token,
 		Username: username,
 		Password: password,
-		Client:   &http.Client{Timeout: 10 * time.Second},
+		Client:   &http.Client{Timeout: 10 * time.Second, CheckRedirect: netguard.CheckRedirect},
+	}, nil
+}
+
+// ── Response reading ─────────────────────────────────────────────────────────────────────
+
+// maxDiagnosticBytes caps how much of a remote error body reaches a log line or
+// the TUI status bar.
+const maxDiagnosticBytes = 512
+
+// diagnosticBody renders a bounded excerpt of a remote error body as a single
+// escaped line. Remote text ends up in log records and in the status bar, so
+// line breaks and control bytes are escaped instead of passed through.
+func diagnosticBody(r io.Reader) string {
+	b, _ := io.ReadAll(io.LimitReader(r, maxDiagnosticBytes+1))
+	truncated := len(b) > maxDiagnosticBytes
+	if truncated {
+		b = b[:maxDiagnosticBytes]
 	}
+	s := strconv.Quote(string(b))
+	if truncated {
+		s += " (truncated)"
+	}
+	return s
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────────────────
@@ -97,14 +127,14 @@ func (c *Client) Login() error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		return fmt.Errorf("login failed with status: %d", resp.StatusCode)
 	}
 
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := netguard.DecodeJSON(resp.Body, &result); err != nil {
 		return err
 	}
 
@@ -162,14 +192,14 @@ func (c *Client) GetViews(projectID int64) ([]View, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		return nil, fmt.Errorf("failed to fetch views: %d", resp.StatusCode)
 	}
 
 	var views []View
-	if err := json.NewDecoder(resp.Body).Decode(&views); err != nil {
+	if err := netguard.DecodeJSON(resp.Body, &views); err != nil {
 		return nil, err
 	}
 
@@ -213,8 +243,7 @@ func (c *Client) GetBucketTasks(projectID, viewID, bucketID int64) ([]Task, erro
 		}
 
 		var buckets []KanbanBucket
-		if err := json.NewDecoder(resp.Body).Decode(&buckets); err != nil {
-			resp.Body.Close()
+		if err := netguard.DecodeJSON(resp.Body, &buckets); err != nil {
 			return nil, err
 		}
 
@@ -260,9 +289,7 @@ func (c *Client) CreateTask(projectID, viewID, bucketID int64, title string) err
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		buf := new(bytes.Buffer)
-		buf.ReadFrom(resp.Body)
-		return fmt.Errorf("create task failed with status: %d, body: %s", resp.StatusCode, buf.String())
+		return fmt.Errorf("create task failed with status: %d, body: %s", resp.StatusCode, diagnosticBody(resp.Body))
 	}
 
 	return nil
