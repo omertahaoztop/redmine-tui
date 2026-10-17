@@ -39,11 +39,11 @@ func TestSyncRejectsNonSnapshotCollection(t *testing.T) {
 				if err != nil {
 					t.Error(err)
 				}
-				page := redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 1, Subject: "first"}}, TotalCount: 3, Limit: 1}
+				page := redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 1, Subject: "first"}}, TotalCount: intPtr(3)}
 				if offset > 0 {
 					// Issue 1 is now closed. Offset 1 skips issue 2, which
 					// remains eligible and must keep its existing task.
-					page = redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 3, Subject: "last"}}, TotalCount: 2, Offset: offset, Limit: 1}
+					page = redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 3, Subject: "last"}}, TotalCount: intPtr(2), Offset: intPtr(offset)}
 				}
 				if err := json.NewEncoder(w).Encode(page); err != nil {
 					t.Error(err)
@@ -73,6 +73,9 @@ func TestSyncRejectsNonSnapshotCollection(t *testing.T) {
 	}
 }
 
+// intPtr builds the pagination envelope's optional fields.
+func intPtr(v int) *int { return &v }
+
 // Existing tasks keep their identity even when two subjects have the same
 // sanitized display text. Missing tasks must also retain the original title.
 func TestSyncPreservesOriginalSubjects(t *testing.T) {
@@ -96,7 +99,7 @@ func TestSyncPreservesOriginalSubjects(t *testing.T) {
 					w.Header().Set("Content-Type", "application/json")
 					switch {
 					case r.Method == http.MethodGet && r.URL.Path == "/issues.json":
-						if err := json.NewEncoder(w).Encode(redmine.IssuesResponse{Issues: issues, TotalCount: len(issues)}); err != nil {
+						if err := json.NewEncoder(w).Encode(redmine.IssuesResponse{Issues: issues, TotalCount: intPtr(len(issues)), Offset: intPtr(0)}); err != nil {
 							t.Error(err)
 						}
 					case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/1/views/2/tasks":
@@ -147,13 +150,49 @@ func TestSyncPreservesOriginalSubjects(t *testing.T) {
 	}
 }
 
+// Reconciliation reads "absent from Redmine" as "closed", so a response without
+// pagination metadata must stop the sync before it touches a single task.
+func TestSyncRefusesResponseWithoutPaginationMetadata(t *testing.T) {
+	var mutations atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/issues.json":
+			if _, err := w.Write([]byte(`{"issues":[]}`)); err != nil {
+				t.Error(err)
+			}
+		default:
+			mutations.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer srv.Close()
+
+	rc, err := redmine.NewClient("key", srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vc, err := vikunja.NewClient(srv.URL, "token", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = SyncIssuesToVikunja(rc, vc, &config.Config{Vikunja: config.Vikunja{ProjectID: 1, ViewID: 2, BucketID: 3}})
+	if err == nil {
+		t.Fatal("sync accepted a response without pagination metadata")
+	}
+	if n := mutations.Load(); n != 0 {
+		t.Fatalf("sync issued %d Vikunja requests after an unverifiable response", n)
+	}
+}
+
 func TestSyncEscapesSubjectInErrors(t *testing.T) {
 	const subject = "\x1b]52;c;x\aoriginal\nsubject"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/issues.json":
-			if err := json.NewEncoder(w).Encode(redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 1, Subject: subject}}, TotalCount: 1}); err != nil {
+			if err := json.NewEncoder(w).Encode(redmine.IssuesResponse{Issues: []redmine.Issue{{ID: 1, Subject: subject}}, TotalCount: intPtr(1), Offset: intPtr(0)}); err != nil {
 				t.Error(err)
 			}
 		case "/api/v1/projects/1/views/2/tasks":
