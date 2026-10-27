@@ -3,7 +3,7 @@
 [![CI](https://github.com/omertahaoztop/redmine-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/omertahaoztop/redmine-tui/actions/workflows/ci.yml)
 [![Go version](https://img.shields.io/github/go-mod/go-version/omertahaoztop/redmine-tui)](go.mod)
 [![Release](https://img.shields.io/github/v/release/omertahaoztop/redmine-tui)](https://github.com/omertahaoztop/redmine-tui/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![AUR](https://img.shields.io/aur/version/redmine-tui?label=AUR&logo=archlinux&color=1793D1)](https://aur.archlinux.org/packages/redmine-tui/)
 [![AUR (bin)](https://img.shields.io/aur/version/redmine-tui-bin?label=AUR%20(bin)&logo=archlinux&color=1793D1)](https://aur.archlinux.org/packages/redmine-tui-bin/)
 
@@ -157,4 +157,6 @@ Make sure credentials are available in the cron environment or via `.redmine-tui
 
 ## License
 
-[MIT](LICENSE)
+GPL-3.0-only — see [LICENSE](LICENSE). Copyright (C) 2026 Ömer Taha Öztop.
+
+Contributions by BarbUk remain under the MIT license; see [NOTICE](NOTICE).
